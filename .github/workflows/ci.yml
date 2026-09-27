@@ -1,0 +1,145 @@
+name: CI
+
+# Every step fails the workflow on a non-zero exit. The quality gate exits non-zero on any
+# CRITICAL data-quality failure, so a critical failure on the real dataset fails CI.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  UV_VERSION: "0.12.19"
+  PROMETHEUS_IMAGE: prom/prometheus:v3.15.0
+
+jobs:
+  # ---------------------------------------------------------------- fast, no database
+  lint:
+    name: Lint, format & config checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: Install lint tooling (locked versions)
+        run: uv sync --frozen --only-group dev --python 3.12
+      - name: Ruff lint
+        run: uv run --no-sync ruff check --output-format=github .
+      - name: Ruff format check
+        run: uv run --no-sync ruff format --check .
+      - name: Prometheus config + rules (promtool)
+        run: >
+          docker run --rm -v "$PWD/monitoring/prometheus:/etc/prometheus:ro"
+          --entrypoint promtool "$PROMETHEUS_IMAGE" check config /etc/prometheus/prometheus.yml
+      - name: Workflow lint (actionlint)
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color
+
+  # ---------------------------------------------------------------- tests + schema checks
+  test:
+    name: Tests, dbt & schema checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Runner identity for the bind-mounted dev container
+        run: |
+          echo "DEV_UID=$(id -u)" >> "$GITHUB_ENV"
+          echo "DEV_GID=$(id -g)" >> "$GITHUB_ENV"
+      - name: Generate .env with random secrets
+        run: python3 scripts/make_env.py
+      - name: Build images
+        run: docker compose --profile dev build migrate dev
+      - name: Start PostgreSQL and apply migrations
+        run: |
+          docker compose up -d --wait postgres
+          docker compose up --exit-code-from migrate migrate
+      - name: "Schema check: migrations are reversible (fresh database)"
+        run: >
+          docker compose run --rm -e OLIST_DB_NAME=olist_dw_test dev
+          sh -c "alembic upgrade head && alembic downgrade base && alembic upgrade head && alembic current"
+      - name: "Schema check: source data contracts"
+        run: docker compose run --rm dev olist contracts validate
+      - name: dbt compile
+        run: docker compose run --rm dev dbt compile --target-path /tmp/dbt-ci
+      - name: pytest (unit + integration + e2e on synthetic data; dbt tests run inside)
+        run: >
+          docker compose run --rm dev pytest -m "not source_data"
+          --cov=olist_platform --cov=orchestration --cov-report=term --cov-report=xml
+          --junitxml=reports/junit.xml
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-reports
+          path: |
+            reports/junit.xml
+            coverage.xml
+          if-no-files-found: ignore
+      - name: Database logs on failure
+        if: failure()
+        run: docker compose logs postgres | tail -100
+
+  # ---------------------------------------------------------------- real dataset
+  real-data:
+    name: Real Olist data - pipeline, quality gate, idempotency
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - name: Runner identity for the bind-mounted dev container
+        run: |
+          echo "DEV_UID=$(id -u)" >> "$GITHUB_ENV"
+          echo "DEV_GID=$(id -g)" >> "$GITHUB_ENV"
+      - name: Generate .env with random secrets
+        run: python3 scripts/make_env.py
+      - name: Restore Olist v2 dataset (keyed by the committed checksum lock)
+        uses: actions/cache@v6
+        with:
+          path: data/raw/olist/v2
+          key: olist-v2-${{ hashFiles('data_contracts/manifest.lock.json') }}
+      - name: Build images
+        run: docker compose --profile dev build migrate dev
+      - name: Start PostgreSQL and apply migrations
+        run: |
+          docker compose up -d --wait postgres
+          docker compose up --exit-code-from migrate migrate
+      - name: Fetch dataset (no-op when cached) and verify it against the lock
+        run: |
+          docker compose run --rm dev olist source fetch
+          docker compose run --rm dev olist contracts check-source
+      - name: Pipeline on real data (quality gate exits 1 on any CRITICAL failure)
+        run: |
+          docker compose run --rm dev olist ingest
+          docker compose run --rm dev olist stage
+          docker compose run --rm dev olist warehouse
+      - name: Real-data end-to-end + idempotency tests
+        run: docker compose run --rm dev pytest -m source_data --junitxml=reports/junit-real.xml
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-reports-real-data
+          path: reports/junit-real.xml
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------- deployable images
+  images:
+    name: Docker images build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Generate .env (compose interpolation needs it)
+        run: python3 scripts/make_env.py
+      - name: Build runtime, dev and Grafana images
+        run: docker compose --profile dev build migrate dev grafana

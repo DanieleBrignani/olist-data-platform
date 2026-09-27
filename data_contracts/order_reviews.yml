@@ -1,0 +1,75 @@
+contract_version: 1
+table: order_reviews
+file: olist_order_reviews_dataset.csv
+dataset_version: 2
+owner: data-platform
+description: >
+  Customer satisfaction surveys sent after delivery (or after the estimated delivery date).
+  Free-text fields contain quoted multi-line text; the file uses CRLF line endings.
+grain: >
+  One record per (review_id, order_id). review_id alone is NOT unique in the source: the same
+  survey response can be linked to several orders (measured in docs/source_profile.md).
+primary_key: [review_id, order_id]
+max_reject_ratio: 0.01
+format: {encoding: utf-8, line_terminator: CRLF}
+
+columns:
+  - name: review_id
+    type: text
+    nullable: false
+    max_length: 32
+    pattern: '^[0-9a-f]{32}$'
+    description: Survey response identifier. Part of the primary key.
+  - name: order_id
+    type: text
+    nullable: false
+    max_length: 32
+    pattern: '^[0-9a-f]{32}$'
+    description: Order the review refers to. An order can have more than one review.
+  - name: review_score
+    type: integer
+    nullable: false
+    description: Satisfaction score from 1 (worst) to 5 (best).
+  - name: review_comment_title
+    type: text
+    nullable: true
+    description: Optional title typed by the customer, Portuguese.
+  - name: review_comment_message
+    type: text
+    nullable: true
+    description: Optional free-text comment, Portuguese; may span several lines.
+  - name: review_creation_date
+    type: timestamp
+    nullable: false
+    description: Date the survey was sent to the customer (time always 00:00:00).
+  - name: review_answer_timestamp
+    type: timestamp
+    nullable: false
+    description: When the customer answered the survey.
+
+foreign_keys:
+  - columns: [order_id]
+    references: {table: orders, columns: [order_id]}
+    severity: ERROR
+    description: A review must refer to a known order.
+
+rules:
+  - name: review_score_in_range
+    check: range
+    column: review_score
+    min: 1
+    max: 5
+    severity: ERROR
+    description: The survey scale is 1..5; anything else is corrupt.
+  - name: answered_not_before_created
+    check: expression
+    columns: [review_answer_timestamp, review_creation_date]
+    sql: review_answer_timestamp >= review_creation_date
+    severity: ERROR
+    description: A survey cannot be answered before it is sent.
+  - name: review_not_in_future
+    check: expression
+    columns: [review_answer_timestamp]
+    sql: review_answer_timestamp <= LOCALTIMESTAMP
+    severity: ERROR
+    description: Answers dated in the future are invalid.

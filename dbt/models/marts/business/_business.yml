@@ -1,0 +1,62 @@
+version: 2
+
+# Business marts: pre-aggregated answers for reporting. Published to schema `marts` only
+# after the quality gate (ADR-0005). Grain is declared and tested for every mart.
+
+models:
+  - name: mart_sales
+    description: >
+      Grain: purchase month. Orders, cancellations, items, revenue, GMV, AOV, payment volume.
+      GMV = item price + freight of orders not canceled/unavailable. AOV = GMV / such orders
+      with at least one item. Payment volume = all payments (can differ from GMV: vouchers,
+      instalment interest, charges on canceled orders).
+    data_tests:
+      - unique_combination_of_columns: {arguments: {columns: [month_start]}}
+    columns:
+      - {name: month_start, description: First day of the purchase month., data_tests: [not_null]}
+      - {name: orders, description: All orders placed in the month.}
+      - {name: canceled_orders, description: Orders with status canceled or unavailable.}
+      - {name: cancellation_rate, description: canceled_orders / orders.}
+      - {name: gmv, description: Gross merchandise value, BRL (excludes canceled/unavailable).}
+      - {name: avg_order_value, description: GMV / non-canceled orders with items, BRL.}
+      - {name: payment_volume, description: Sum of all payments for orders of the month, BRL.}
+
+  - name: mart_payment_methods
+    description: "Grain: purchase month x payment type. Payment volume, count, instalments."
+    data_tests:
+      - unique_combination_of_columns: {arguments: {columns: [month_start, payment_type]}}
+
+  - name: mart_delivery_performance
+    description: >
+      Grain: purchase month x customer state, delivered orders only. Lead time average,
+      median and p90; late = delivered on a later calendar day than the estimated date.
+    data_tests:
+      - unique_combination_of_columns: {arguments: {columns: [month_start, customer_state]}}
+
+  - name: mart_customer_behavior
+    description: >
+      Grain: person (customer_unique_id). Orders, repeat flag, lifetime value (non-canceled
+      order value), average review, days between first and last order.
+    columns:
+      - {name: customer_unique_id, data_tests: [unique, not_null]}
+
+  - name: mart_seller_performance
+    description: >
+      Grain: seller with at least one sale. Revenue, items, late delivery rate (of delivered
+      orders), share of orders handed to the carrier after the seller's shipping limit,
+      average review of orders containing the seller's items, revenue rank.
+    columns:
+      - {name: seller_id, data_tests: [unique, not_null]}
+
+  - name: mart_category_performance
+    description: >
+      Grain: reporting category (English, Portuguese fallback, 'uncategorized'), non-canceled
+      orders. Order-level outcomes (review, lateness) are attributed to every category present
+      in the order - a stated approximation, since reviews rate the whole order.
+    columns:
+      - {name: category_name, data_tests: [unique, not_null]}
+
+  - name: mart_review_distribution
+    description: "Grain: month the survey was sent x review score (1-5)."
+    data_tests:
+      - unique_combination_of_columns: {arguments: {columns: [month_start, review_score]}}

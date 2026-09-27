@@ -1,0 +1,112 @@
+contract_version: 1
+table: orders
+file: olist_orders_dataset.csv
+dataset_version: 2
+owner: data-platform
+description: >
+  Order header: one record per purchase made on the Olist marketplace, with its lifecycle
+  status and the timestamps of each fulfilment milestone. Hub table of the dataset.
+grain: One record per order (order_id).
+primary_key: [order_id]
+max_reject_ratio: 0.01
+format: {encoding: utf-8, line_terminator: LF}
+
+columns:
+  - name: order_id
+    type: text
+    nullable: false
+    unique: true
+    max_length: 32
+    pattern: '^[0-9a-f]{32}$'
+    description: Anonymised order identifier (32-char hex). Primary key.
+  - name: customer_id
+    type: text
+    nullable: false
+    unique: true
+    max_length: 32
+    pattern: '^[0-9a-f]{32}$'
+    description: >
+      Per-order customer key into customers. Olist issues a new customer_id per order, so it is
+      1:1 with order_id; the person is identified by customers.customer_unique_id.
+  - name: order_status
+    type: text
+    nullable: false
+    description: Lifecycle state at extraction time (delivered, shipped, canceled, ...).
+  - name: order_purchase_timestamp
+    type: timestamp
+    nullable: false
+    description: When the customer placed the order. Local Brazilian time, no timezone in source.
+  - name: order_approved_at
+    type: timestamp
+    nullable: true
+    description: Payment approval time. Empty when payment was never approved (e.g. canceled).
+  - name: order_delivered_carrier_date
+    type: timestamp
+    nullable: true
+    description: When the seller handed the parcel to the logistics partner.
+  - name: order_delivered_customer_date
+    type: timestamp
+    nullable: true
+    description: Actual delivery to the customer. Empty for orders not (yet) delivered.
+  - name: order_estimated_delivery_date
+    type: timestamp
+    nullable: false
+    description: Delivery date promised to the customer at purchase (date, time always 00:00:00).
+
+foreign_keys:
+  - columns: [customer_id]
+    references: {table: customers, columns: [customer_id]}
+    severity: ERROR
+    description: Every order must belong to a known customer record.
+
+rules:
+  - name: order_status_accepted
+    check: accepted_values
+    column: order_status
+    values: [created, approved, invoiced, processing, shipped, delivered, canceled, unavailable]
+    severity: ERROR
+    description: An unknown status cannot be mapped to delivery/cancellation metrics.
+  - name: approved_not_before_purchase
+    check: expression
+    columns: [order_approved_at, order_purchase_timestamp]
+    sql: order_approved_at >= order_purchase_timestamp
+    severity: ERROR
+    description: Payment cannot be approved before the order exists.
+  - name: delivered_not_before_purchase
+    check: expression
+    columns: [order_delivered_customer_date, order_purchase_timestamp]
+    sql: order_delivered_customer_date >= order_purchase_timestamp
+    severity: ERROR
+    description: A negative delivery lead time would corrupt delivery-performance metrics.
+  - name: carrier_not_before_purchase
+    check: expression
+    columns: [order_delivered_carrier_date, order_purchase_timestamp]
+    sql: order_delivered_carrier_date >= order_purchase_timestamp
+    severity: WARNING
+    description: >
+      Hand-off to carrier before purchase is physically impossible; observed in the source
+      (see docs/source_profile.md), kept but flagged because customer-facing dates are valid.
+  - name: delivered_not_before_carrier
+    check: expression
+    columns: [order_delivered_customer_date, order_delivered_carrier_date]
+    sql: order_delivered_customer_date >= order_delivered_carrier_date
+    severity: WARNING
+    description: Delivery before carrier hand-off indicates a mis-keyed carrier date.
+  - name: delivered_status_has_delivery_date
+    check: expression
+    columns: [order_status, order_delivered_customer_date]
+    sql: order_status <> 'delivered' OR order_delivered_customer_date IS NOT NULL
+    severity: WARNING
+    description: Delivered orders without a delivery date are excluded from lead-time metrics.
+  - name: canceled_not_delivered
+    check: expression
+    columns: [order_status, order_delivered_customer_date]
+    sql: order_status <> 'canceled' OR order_delivered_customer_date IS NULL
+    severity: WARNING
+    description: A canceled order with a delivery date has contradictory status.
+  - name: purchase_not_in_future
+    check: expression
+    columns: [order_purchase_timestamp]
+    sql: order_purchase_timestamp <= LOCALTIMESTAMP
+    severity: ERROR
+    description: Orders dated in the future are invalid and would distort time series.

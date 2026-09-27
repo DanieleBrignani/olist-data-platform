@@ -1,0 +1,80 @@
+contract_version: 1
+table: order_payments
+file: olist_order_payments_dataset.csv
+dataset_version: 2
+owner: data-platform
+description: >
+  Payments applied to orders. An order can be paid with several instruments (e.g. a voucher
+  plus a credit card), each one a separate record with its own sequence number.
+grain: One record per payment instrument within an order (order_id, payment_sequential).
+primary_key: [order_id, payment_sequential]
+max_reject_ratio: 0.01
+format: {encoding: utf-8, line_terminator: LF}
+
+columns:
+  - name: order_id
+    type: text
+    nullable: false
+    max_length: 32
+    pattern: '^[0-9a-f]{32}$'
+    description: Order being paid. Part of the primary key.
+  - name: payment_sequential
+    type: integer
+    nullable: false
+    description: Sequence of the payment instrument within the order, starting at 1.
+  - name: payment_type
+    type: text
+    nullable: false
+    description: Payment method (credit_card, boleto, voucher, debit_card, not_defined).
+  - name: payment_installments
+    type: integer
+    nullable: false
+    description: Number of instalments chosen by the customer (credit card).
+  - name: payment_value
+    type: numeric
+    nullable: false
+    description: Amount paid with this instrument, BRL.
+
+foreign_keys:
+  - columns: [order_id]
+    references: {table: orders, columns: [order_id]}
+    severity: ERROR
+    description: A payment must belong to a known order.
+
+rules:
+  - name: payment_type_accepted
+    check: accepted_values
+    column: payment_type
+    values: [credit_card, boleto, voucher, debit_card, not_defined]
+    severity: ERROR
+    description: Unknown payment types cannot be reported by method.
+  - name: payment_type_defined
+    check: expression
+    columns: [payment_type]
+    sql: payment_type <> 'not_defined'
+    severity: WARNING
+    description: The source uses 'not_defined' for a few payments; kept, reported as unknown method.
+  - name: payment_sequential_positive
+    check: range
+    column: payment_sequential
+    min: 1
+    severity: ERROR
+    description: Sequence numbers start at 1.
+  - name: payment_value_non_negative
+    check: range
+    column: payment_value
+    min: 0
+    severity: ERROR
+    description: A negative payment is not representable in this dataset (no refunds file).
+  - name: installments_non_negative
+    check: range
+    column: payment_installments
+    min: 0
+    severity: ERROR
+    description: A negative number of instalments is invalid.
+  - name: installments_at_least_one
+    check: range
+    column: payment_installments
+    min: 1
+    severity: WARNING
+    description: Zero instalments is observed in the source and is ambiguous; flagged, not dropped.

@@ -1,0 +1,177 @@
+name: olist-platform
+
+x-app-environment: &app-environment
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: "5432"
+  DBT_PROFILES_DIR: /app/dbt
+  DBT_PROJECT_DIR: /app/dbt
+
+x-app-env: &app-env
+  env_file: .env
+  environment: *app-environment
+
+services:
+  postgres:
+    image: postgres:16.10-bookworm
+    # Docker's default /dev/shm is 64 MB; parallel hash joins from concurrent dbt threads
+    # exhausted it ("could not resize shared memory segment", docs/what-failed.md)
+    shm_size: 256mb
+    env_file: .env
+    environment:
+      POSTGRES_DB: postgres
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-55432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # TCP (not the unix socket) so the check cannot pass while the entrypoint's temporary
+      # init server is still running; querying olist_dw proves the init script completed.
+      test: ["CMD-SHELL", "PGPASSWORD=\"$$POSTGRES_PASSWORD\" psql -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d olist_dw -tAc 'select 1'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  # One-shot: applies Alembic migrations as the admin role, then exits 0.
+  migrate:
+    <<: *app-env
+    build:
+      context: .
+      dockerfile: docker/app.Dockerfile
+      target: runtime
+    image: olist-platform:runtime
+    command: ["db", "upgrade"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  # Interactive tooling / tests: `docker compose run --rm dev pytest`
+  dev:
+    <<: *app-env
+    build:
+      context: .
+      dockerfile: docker/app.Dockerfile
+      target: dev
+    image: olist-platform:dev
+    # The repo is bind-mounted: on Linux (CI) the container must run as the uid that owns the
+    # checkout or it cannot write dbt/target, logs or data. Docker Desktop hides this locally.
+    user: "${DEV_UID:-10001}:${DEV_GID:-10001}"
+    environment:
+      <<: *app-environment
+      PREFECT_HOME: /tmp/prefect
+    volumes:
+      - ./:/app
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    profiles: ["dev"]
+
+  # Prefect API + UI (http://localhost:4200). Metadata in its own database `prefect` on the
+  # same instance, isolated from the warehouse (ADR-0001/0003).
+  prefect-server:
+    image: prefecthq/prefect:3.8.6-python3.12
+    command: ["prefect", "server", "start", "--host", "0.0.0.0", "--port", "4200"]
+    environment:
+      PREFECT_API_DATABASE_CONNECTION_URL: "postgresql+asyncpg://prefect:${PREFECT_DB_PASSWORD}@postgres:5432/prefect"
+      PREFECT_UI_API_URL: http://localhost:4200/api
+      PREFECT_SERVER_ANALYTICS_ENABLED: "false"
+      PREFECT_LOGGING_LEVEL: WARNING
+    ports:
+      - "127.0.0.1:4200:4200"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:4200/api/health', timeout=4)"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+
+  # Serves the `olist-refresh` deployment and executes its runs (orchestration/serve.py).
+  pipeline-worker:
+    image: olist-platform:runtime
+    env_file: .env
+    environment:
+      <<: *app-environment
+      PREFECT_API_URL: http://prefect-server:4200/api
+      PREFECT_LOGGING_EXTRA_LOGGERS: olist_platform,orchestration
+    entrypoint: ["python", "-m", "orchestration.serve"]
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      prefect-server:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Prometheus metrics derived from the meta.* tables (read-only monitor role, ADR-0007)
+  metrics-exporter:
+    image: olist-platform:runtime
+    env_file: .env
+    environment: *app-environment
+    command: ["exporter", "--port", "9108"]
+    ports:
+      - "127.0.0.1:9108:9108"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:9108/metrics', timeout=4)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+    volumes:
+      - ./monitoring/prometheus:/etc/prometheus:ro
+      - promdata:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    depends_on:
+      metrics-exporter:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Dashboard provisioned from monitoring/grafana (http://localhost:3000). Anonymous VIEWER
+  # access is enabled for the local demo only (port bound to 127.0.0.1); disable in production.
+  grafana:
+    build:
+      context: .
+      dockerfile: docker/grafana.Dockerfile
+    image: olist-platform:grafana
+    environment:
+      # Plugins are baked into the image (pinned); never download or auto-update at startup
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
+      GF_PLUGINS_PREINSTALL_AUTO_UPDATE: "false"
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/olist_pipeline.json
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  promdata:
+  grafanadata:

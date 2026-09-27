@@ -1,0 +1,19 @@
+version: 2
+
+sources:
+  - name: src
+    description: >
+      Typed, contract-conforming source tables built by `olist stage` (load_staging).
+      Records violating ERROR rules are already quarantined in meta.rejected_records;
+      WARNING records are present and flagged there.
+    schema: src
+    tables:
+      - name: customers
+      - name: orders
+      - name: order_items
+      - name: order_payments
+      - name: order_reviews
+      - name: products
+      - name: sellers
+      - name: geolocation
+      - name: product_category_translation

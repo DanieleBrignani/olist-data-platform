@@ -1,0 +1,23 @@
+contract_version: 1
+table: product_category_translation
+file: product_category_name_translation.csv
+dataset_version: 2
+owner: data-platform
+description: >
+  Lookup from Portuguese product category names to English. Unlike the other files it is
+  encoded with a UTF-8 byte-order mark and CRLF line endings (measured, see source_profile).
+grain: One record per Portuguese category name.
+primary_key: [product_category_name]
+max_reject_ratio: 0.0
+format: {encoding: utf-8-sig, line_terminator: CRLF}
+
+columns:
+  - name: product_category_name
+    type: text
+    nullable: false
+    unique: true
+    description: Portuguese category name as used in products.product_category_name.
+  - name: product_category_name_english
+    type: text
+    nullable: false
+    description: English translation used for reporting.

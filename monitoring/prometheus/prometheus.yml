@@ -1,0 +1,16 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/rules.yml
+
+scrape_configs:
+  # Metrics derived from the meta.* tables (ADR-0007); the batch pipeline itself is not scraped
+  - job_name: olist-metrics
+    static_configs:
+      - targets: ["metrics-exporter:9108"]
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

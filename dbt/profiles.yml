@@ -1,0 +1,16 @@
+# No credentials here: everything comes from environment variables (.env, never committed).
+# dbt connects as the least-privilege pipeline role (docs/adr/0009).
+olist:
+  target: default
+  outputs:
+    default:
+      type: postgres
+      host: "{{ env_var('POSTGRES_HOST') }}"
+      port: "{{ env_var('POSTGRES_PORT', '5432') | as_number }}"
+      user: olist_pipeline
+      password: "{{ env_var('OLIST_PIPELINE_PASSWORD') }}"
+      dbname: "{{ env_var('OLIST_DB_NAME', 'olist_dw') }}"
+      schema: stg
+      threads: 4
+      connect_timeout: 10
+      keepalives_idle: 0

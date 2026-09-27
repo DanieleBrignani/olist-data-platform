@@ -1,0 +1,49 @@
+name: olist
+version: "1.0.0"
+config-version: 2
+profile: olist
+
+model-paths: ["models"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+target-path: "{{ env_var('DBT_TARGET_PATH', 'target') }}"
+clean-targets: ["target"]
+
+# Full refresh everywhere (ADR-0006): the source is a static, versioned snapshot.
+# Warehouse and marts are built into *_build schemas and published by an atomic swap
+# after the quality gate (ADR-0005); consumers never read the build schemas.
+models:
+  olist:
+    +persist_docs:
+      relation: true
+      columns: true
+    staging:
+      +schema: stg
+      +materialized: view
+    intermediate:
+      +schema: int
+      +materialized: view
+    marts:
+      core:
+        +schema: warehouse_build
+        +materialized: table
+      business:
+        +schema: marts_build
+        +materialized: table
+
+# Data-quality classification (ADR-0004). Every test is CRITICAL unless it says otherwise:
+# an unclassified rule is treated strictly. Each test's dbt `severity`/`error_if` mirrors its
+# `meta.dq_severity`/`meta.tolerance` so `dbt test` on a laptop agrees with the quality gate
+# (a unit test enforces the alignment). Failing rows are stored for diagnosis.
+data_tests:
+  olist:
+    +severity: error
+    +store_failures: true
+    +schema: dq_failures
+    +meta:
+      dq_severity: CRITICAL
+
+vars:
+  # Olist's own business day boundary: an order is late when delivered on a later calendar
+  # day than the estimated delivery date (estimates are dates, always 00:00:00).
+  late_delivery_grace_days: 0

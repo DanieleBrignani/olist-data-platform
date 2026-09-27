@@ -1,0 +1,41 @@
+groups:
+  - name: olist_recording
+    rules:
+      # Freshness of the PUBLISHED warehouse (time since the last successful publication).
+      # Not the age of the business events: Olist ends in 2018, which is exposed separately as
+      # source_max_event_timestamp_seconds so the panel is not misleading (ADR-0007).
+      - record: dataset_freshness_seconds
+        expr: time() - dataset_last_published_timestamp_seconds
+
+  - name: olist_alerts
+    rules:
+      - alert: OlistPipelineFailed
+        expr: increase(pipeline_failures_total[1h]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "olist pipeline {{ $labels.flow }} failed at {{ $labels.failed_task }} ({{ $labels.error_type }})"
+
+      - alert: OlistQualityGateFailed
+        expr: quality_gate_last_decision == 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "The last quality gate FAILED: publication was blocked, consumers see the previous version"
+
+      # Assumes a daily refresh schedule (OLIST_REFRESH_CRON); 26h leaves a 2h margin.
+      - alert: OlistDatasetStale
+        expr: dataset_freshness_seconds > 26 * 3600
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Published warehouse is {{ $value | humanizeDuration }} old"
+
+      - alert: OlistMetricsUnavailable
+        expr: up{job="olist-metrics"} == 0 or olist_exporter_db_up == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pipeline metrics cannot be read (exporter down or metadata DB unreachable)"

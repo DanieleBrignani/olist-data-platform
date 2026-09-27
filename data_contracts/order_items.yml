@@ -1,0 +1,90 @@
+contract_version: 1
+table: order_items
+file: olist_order_items_dataset.csv
+dataset_version: 2
+owner: data-platform
+description: >
+  Line items of each order: which product was sold by which seller, at what price and
+  freight. Quantity is represented by repeated lines (order_item_id 1..n), not a column.
+grain: One record per item line within an order (order_id, order_item_id).
+primary_key: [order_id, order_item_id]
+max_reject_ratio: 0.01
+format: {encoding: utf-8, line_terminator: LF}
+
+columns:
+  - name: order_id
+    type: text
+    nullable: false
+    max_length: 32
+    pattern: '^[0-9a-f]{32}$'
+    description: Parent order. Part of the primary key.
+  - name: order_item_id
+    type: integer
+    nullable: false
+    description: Sequential line number inside the order, starting at 1. Part of the primary key.
+  - name: product_id
+    type: text
+    nullable: false
+    max_length: 32
+    pattern: '^[0-9a-f]{32}$'
+    description: Product sold on this line.
+  - name: seller_id
+    type: text
+    nullable: false
+    max_length: 32
+    pattern: '^[0-9a-f]{32}$'
+    description: Seller who fulfils this line (an order can have several sellers).
+  - name: shipping_limit_date
+    type: timestamp
+    nullable: false
+    description: Deadline for the seller to hand the item to the logistics partner.
+  - name: price
+    type: numeric
+    nullable: false
+    description: Item price in BRL, excluding freight.
+  - name: freight_value
+    type: numeric
+    nullable: false
+    description: >
+      Freight charged for this item in BRL. When an order has several items the order freight
+      is split across them.
+
+foreign_keys:
+  - columns: [order_id]
+    references: {table: orders, columns: [order_id]}
+    severity: ERROR
+    description: An item without its order cannot be attributed to a customer or date.
+  - columns: [product_id]
+    references: {table: products, columns: [product_id]}
+    severity: ERROR
+    description: An item must reference a known product for category reporting.
+  - columns: [seller_id]
+    references: {table: sellers, columns: [seller_id]}
+    severity: ERROR
+    description: An item must reference a known seller for seller performance.
+
+rules:
+  - name: order_item_id_positive
+    check: range
+    column: order_item_id
+    min: 1
+    severity: ERROR
+    description: Line numbers start at 1.
+  - name: price_positive
+    check: expression
+    columns: [price]
+    sql: price > 0
+    severity: ERROR
+    description: A zero or negative item price is not a sale.
+  - name: freight_non_negative
+    check: range
+    column: freight_value
+    min: 0
+    severity: ERROR
+    description: Freight can be free (0) but never negative.
+  - name: shipping_limit_not_in_future
+    check: expression
+    columns: [shipping_limit_date]
+    sql: shipping_limit_date <= LOCALTIMESTAMP
+    severity: ERROR
+    description: A deadline in the future relative to load time is invalid for a closed snapshot.

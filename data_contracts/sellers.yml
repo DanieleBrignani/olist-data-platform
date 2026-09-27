@@ -1,0 +1,54 @@
+contract_version: 1
+table: sellers
+file: olist_sellers_dataset.csv
+dataset_version: 2
+owner: data-platform
+description: Marketplace sellers that fulfil order items, with their location.
+grain: One record per seller (seller_id).
+primary_key: [seller_id]
+max_reject_ratio: 0.01
+format: {encoding: utf-8, line_terminator: LF}
+
+columns:
+  - name: seller_id
+    type: text
+    nullable: false
+    unique: true
+    max_length: 32
+    pattern: '^[0-9a-f]{32}$'
+    description: Anonymised seller identifier. Primary key.
+  - name: seller_zip_code_prefix
+    type: text
+    nullable: false
+    max_length: 5
+    pattern: '^[0-9]{5}$'
+    description: First 5 digits of the seller CEP; text to preserve leading zeros.
+  - name: seller_city
+    type: text
+    nullable: false
+    description: Seller city name as typed in the source (not normalised).
+  - name: seller_state
+    type: text
+    nullable: false
+    max_length: 2
+    description: Two-letter Brazilian federative unit (UF) code.
+
+foreign_keys:
+  - columns: [seller_zip_code_prefix]
+    references: {table: geolocation, columns: [geolocation_zip_code_prefix]}
+    severity: WARNING
+    description: Existence check only; a few seller prefixes are absent from geolocation.
+
+rules:
+  - name: seller_state_is_uf
+    check: accepted_values
+    column: seller_state
+    values: [AC, AL, AM, AP, BA, CE, DF, ES, GO, MA, MG, MS, MT, PA, PB, PE, PI, PR, RJ, RN, RO, RR, RS, SC, SE, SP, TO]
+    severity: ERROR
+    description: State must be one of the 27 Brazilian federative units.
+  - name: seller_city_has_no_digits
+    check: expression
+    columns: [seller_city]
+    sql: seller_city !~ '[0-9]'
+    severity: WARNING
+    description: A numeric city name (observed once) is a data-entry error; city reported as-is.

@@ -1,0 +1,70 @@
+contract_version: 1
+table: geolocation
+file: olist_geolocation_dataset.csv
+dataset_version: 2
+owner: data-platform
+description: >
+  Reference list of coordinates observed for each CEP zip prefix. Not an entity table: a
+  prefix has many coordinate points, and the file contains many exact duplicate records.
+grain: >
+  One record per observed (zip prefix, lat, lng, city, state) point. Exact duplicate records
+  are collapsed in src (counted and logged as WARNING, kept in raw for lineage).
+primary_key: []
+deduplicate_exact_rows: true
+max_reject_ratio: 0.01
+format: {encoding: utf-8, line_terminator: LF}
+
+columns:
+  - name: geolocation_zip_code_prefix
+    type: text
+    nullable: false
+    max_length: 5
+    pattern: '^[0-9]{5}$'
+    description: First 5 digits of the CEP; text to preserve leading zeros.
+  - name: geolocation_lat
+    type: numeric
+    nullable: false
+    description: Latitude in decimal degrees (WGS84 assumed; not stated by the source).
+  - name: geolocation_lng
+    type: numeric
+    nullable: false
+    description: Longitude in decimal degrees.
+  - name: geolocation_city
+    type: text
+    nullable: false
+    description: City name as recorded, with inconsistent accents/casing across records.
+  - name: geolocation_state
+    type: text
+    nullable: false
+    max_length: 2
+    description: Two-letter Brazilian federative unit (UF) code.
+
+rules:
+  - name: latitude_valid
+    check: range
+    column: geolocation_lat
+    min: -90
+    max: 90
+    severity: ERROR
+    description: Latitude outside [-90, 90] is not a coordinate.
+  - name: longitude_valid
+    check: range
+    column: geolocation_lng
+    min: -180
+    max: 180
+    severity: ERROR
+    description: Longitude outside [-180, 180] is not a coordinate.
+  - name: coordinates_within_brazil
+    check: expression
+    columns: [geolocation_lat, geolocation_lng]
+    sql: geolocation_lat BETWEEN -34.0 AND 5.5 AND geolocation_lng BETWEEN -74.0 AND -28.0
+    severity: WARNING
+    description: >
+      Points outside Brazil's bounding box are mis-geocoded; kept but excluded when computing
+      the representative coordinate of a prefix in dim_geography.
+  - name: geolocation_state_is_uf
+    check: accepted_values
+    column: geolocation_state
+    values: [AC, AL, AM, AP, BA, CE, DF, ES, GO, MA, MG, MS, MT, PA, PB, PE, PI, PR, RJ, RN, RO, RR, RS, SC, SE, SP, TO]
+    severity: ERROR
+    description: State must be one of the 27 Brazilian federative units.

@@ -1,0 +1,62 @@
+contract_version: 1
+table: customers
+file: olist_customers_dataset.csv
+dataset_version: 2
+owner: data-platform
+description: >
+  Customer record attached to each order, with the delivery location (zip prefix, city,
+  state). Olist creates one customer_id per order; customer_unique_id identifies the person.
+grain: One record per order-level customer key (customer_id).
+primary_key: [customer_id]
+max_reject_ratio: 0.01
+format: {encoding: utf-8, line_terminator: LF}
+
+columns:
+  - name: customer_id
+    type: text
+    nullable: false
+    unique: true
+    max_length: 32
+    pattern: '^[0-9a-f]{32}$'
+    description: Order-scoped customer key; referenced by orders.customer_id. Primary key.
+  - name: customer_unique_id
+    type: text
+    nullable: false
+    max_length: 32
+    pattern: '^[0-9a-f]{32}$'
+    description: >
+      Stable identifier of the person across orders. NOT unique in this file (repeat buyers);
+      it is the natural key of dim_customer.
+  - name: customer_zip_code_prefix
+    type: text
+    nullable: false
+    max_length: 5
+    pattern: '^[0-9]{5}$'
+    description: >
+      First 5 digits of the Brazilian CEP. Stored as text because leading zeros are
+      significant (e.g. 01003 in São Paulo).
+  - name: customer_city
+    type: text
+    nullable: false
+    description: Delivery city name, lower-case, without accents in most records.
+  - name: customer_state
+    type: text
+    nullable: false
+    max_length: 2
+    description: Two-letter Brazilian federative unit (UF) code.
+
+foreign_keys:
+  - columns: [customer_zip_code_prefix]
+    references: {table: geolocation, columns: [geolocation_zip_code_prefix]}
+    severity: WARNING
+    description: >
+      Existence check only (geolocation has many rows per prefix). Some prefixes are absent from
+      the geolocation file; such customers keep their city/state but get no coordinates.
+
+rules:
+  - name: customer_state_is_uf
+    check: accepted_values
+    column: customer_state
+    values: [AC, AL, AM, AP, BA, CE, DF, ES, GO, MA, MG, MS, MT, PA, PB, PE, PI, PR, RJ, RN, RO, RR, RS, SC, SE, SP, TO]
+    severity: ERROR
+    description: State must be one of the 27 Brazilian federative units.

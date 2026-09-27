@@ -1,0 +1,340 @@
+version: 2
+
+# Enforced contracts: PostgreSQL itself holds the PK / FK / NOT NULL constraints of the
+# warehouse, and dbt fails the build if a model's columns or types drift from this file.
+# Keys are the source's own stable identifiers (ADR-0011): the snapshot has no change
+# history, so surrogate keys / SCD2 would be fabricated.
+
+models:
+  # ------------------------------------------------------------------ dimensions
+  - name: dim_date
+    description: >
+      Calendar. Exists because every fact is analysed by day/month/weekday and the source
+      only has raw timestamps. Covers every date referenced by any fact.
+    config:
+      contract: {enforced: true}
+    columns:
+      - {name: date_key, data_type: integer, constraints: [{type: primary_key}], description: "yyyymmdd"}
+      - {name: date_day, data_type: date, constraints: [{type: not_null}], description: Calendar date.}
+      - {name: iso_year, data_type: integer, description: ISO-8601 week-numbering year.}
+      - {name: year, data_type: integer, description: Calendar year.}
+      - {name: quarter, data_type: integer, description: Quarter 1-4.}
+      - {name: month, data_type: integer, description: Month 1-12.}
+      - {name: month_name, data_type: text, description: English month name.}
+      - {name: year_month, data_type: text, description: "YYYY-MM"}
+      - {name: month_start, data_type: date, description: First day of the month.}
+      - {name: iso_week, data_type: integer, description: ISO week number.}
+      - {name: day_of_month, data_type: integer, description: Day 1-31.}
+      - {name: day_of_week, data_type: integer, description: ISO day of week (1 = Monday).}
+      - {name: day_name, data_type: text, description: English weekday name.}
+      - {name: is_weekend, data_type: boolean, description: Saturday or Sunday.}
+
+  - name: dim_geography
+    description: >
+      One row per CEP zip prefix seen in geolocation, customers or sellers. Exists because
+      location is shared by customers and sellers and the raw geolocation file has many
+      points per prefix; this is the single resolved location (representative city/state,
+      centroid of in-Brazil points). has_coordinates = false for prefixes absent from the
+      geolocation file or with only mis-geocoded points.
+    config:
+      contract: {enforced: true}
+    columns:
+      - {name: zip_code_prefix, data_type: text, constraints: [{type: primary_key}], description: First 5 digits of the CEP.}
+      - {name: city, data_type: text, constraints: [{type: not_null}], description: Most frequent normalised city name for the prefix.}
+      - {name: state, data_type: text, constraints: [{type: not_null}], description: UF code.}
+      - {name: latitude, data_type: "numeric(9,6)", description: Centroid latitude of in-Brazil points (NULL if none).}
+      - {name: longitude, data_type: "numeric(9,6)", description: Centroid longitude of in-Brazil points (NULL if none).}
+      - {name: coordinate_points, data_type: bigint, description: Distinct in-Brazil points averaged.}
+      - {name: has_coordinates, data_type: boolean, description: Whether a centroid exists.}
+
+  - name: dim_customer
+    description: >
+      One row per PERSON (customer_unique_id). Exists because the source's customer_id is
+      issued per order, so "customers" in the raw data are really order addresses; repeat
+      behaviour is only visible at person level. Address = the one of the most recent order
+      (SCD type 1; the order's own delivery location is kept on fct_orders).
+    config:
+      contract: {enforced: true}
+    constraints:
+      - type: foreign_key
+        columns: [zip_code_prefix]
+        to: ref('dim_geography')
+        to_columns: [zip_code_prefix]
+    columns:
+      - {name: customer_unique_id, data_type: text, constraints: [{type: primary_key}], description: Person identifier.}
+      - {name: zip_code_prefix, data_type: text, constraints: [{type: not_null}], description: Zip prefix of the latest order.}
+      - {name: state, data_type: text, constraints: [{type: not_null}], description: UF of the latest order.}
+      - {name: first_order_date, data_type: date, constraints: [{type: not_null}], description: Date of the person's first order.}
+      - {name: is_repeat_customer, data_type: boolean, constraints: [{type: not_null}], description: More than one non-canceled order.}
+
+  - name: dim_product
+    description: >
+      One row per product. Exists to group sales by category and physical attributes;
+      resolves the Portuguese category to English, falling back to the Portuguese name for
+      the 2 untranslated categories and to 'uncategorized' when the source has none.
+    config:
+      contract: {enforced: true}
+    columns:
+      - {name: product_id, data_type: text, constraints: [{type: primary_key}], description: Product identifier.}
+      - {name: category_name, data_type: text, constraints: [{type: not_null}], description: Reporting category (English > Portuguese > 'uncategorized').}
+      - {name: category_name_pt, data_type: text, description: Source (Portuguese) category, NULL when unknown.}
+      - {name: has_english_category, data_type: boolean, description: Translation exists.}
+      - {name: name_length, data_type: integer, description: Characters in product name.}
+      - {name: description_length, data_type: integer, description: Characters in description.}
+      - {name: photos_qty, data_type: integer, description: Published photos.}
+      - {name: weight_g, data_type: integer, description: Weight in grams.}
+      - {name: length_cm, data_type: integer, description: Package length.}
+      - {name: height_cm, data_type: integer, description: Package height.}
+      - {name: width_cm, data_type: integer, description: Package width.}
+      - {name: volume_cm3, data_type: integer, description: length x height x width.}
+
+  - name: dim_seller
+    description: >
+      One row per seller. Exists because seller performance (lateness, reviews, revenue) is a
+      primary operational question and sellers have their own location.
+    config:
+      contract: {enforced: true}
+    constraints:
+      - type: foreign_key
+        columns: [zip_code_prefix]
+        to: ref('dim_geography')
+        to_columns: [zip_code_prefix]
+    columns:
+      - {name: seller_id, data_type: text, constraints: [{type: primary_key}], description: Seller identifier.}
+      - {name: zip_code_prefix, data_type: text, constraints: [{type: not_null}], description: Seller zip prefix.}
+      - {name: city, data_type: text, constraints: [{type: not_null}], description: Normalised city.}
+      - {name: state, data_type: text, constraints: [{type: not_null}], description: UF code.}
+      - {name: first_sale_date, data_type: date, description: Purchase date of the seller's first sold item.}
+
+  # ------------------------------------------------------------------ facts
+  - name: fct_orders
+    description: >
+      Business process: order placement and fulfilment. Grain: one row per order.
+      Additive measures: item_count, items_value, freight_value, order_value, payment_value,
+      payment_count, review_count, is_* flags as 0/1 counts. Non-additive: max_installments,
+      *_days durations, days_vs_estimate, avg_review_score (average them, never sum).
+    config:
+      contract: {enforced: true}
+      indexes:
+        - {columns: [customer_unique_id]}
+        - {columns: [purchase_date_key]}
+    constraints:
+      - {type: foreign_key, columns: [customer_unique_id], to: ref('dim_customer'), to_columns: [customer_unique_id]}
+      - {type: foreign_key, columns: [zip_code_prefix], to: ref('dim_geography'), to_columns: [zip_code_prefix]}
+      - {type: foreign_key, columns: [purchase_date_key], to: ref('dim_date'), to_columns: [date_key]}
+      - {type: foreign_key, columns: [delivered_date_key], to: ref('dim_date'), to_columns: [date_key]}
+      - {type: foreign_key, columns: [estimated_delivery_date_key], to: ref('dim_date'), to_columns: [date_key]}
+    columns:
+      - name: order_id
+        data_type: text
+        constraints: [{type: primary_key}]
+        description: Order identifier (degenerate dimension).
+        data_tests: [unique, not_null]
+      - {name: customer_id, data_type: text, constraints: [{type: not_null}], description: Source per-order customer key (degenerate).}
+      - name: customer_unique_id
+        data_type: text
+        constraints: [{type: not_null}]
+        description: FK dim_customer.
+        data_tests:
+          - relationships: {arguments: {to: ref('dim_customer'), field: customer_unique_id}}
+      - {name: zip_code_prefix, data_type: text, constraints: [{type: not_null}], description: FK dim_geography - delivery location of THIS order.}
+      - name: purchase_date_key
+        data_type: integer
+        constraints: [{type: not_null}]
+        description: FK dim_date.
+        data_tests:
+          - relationships: {arguments: {to: ref('dim_date'), field: date_key}}
+      - {name: delivered_date_key, data_type: integer, description: FK dim_date; NULL if not delivered.}
+      - {name: estimated_delivery_date_key, data_type: integer, constraints: [{type: not_null}], description: FK dim_date.}
+      - name: order_status
+        data_type: text
+        constraints: [{type: not_null}]
+        description: Lifecycle status at extraction.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [created, approved, invoiced, processing, shipped, delivered, canceled, unavailable]
+              config: {meta: {dq_severity: ERROR, tolerance: 0}}
+      - {name: is_canceled, data_type: boolean, constraints: [{type: not_null}], description: Status canceled or unavailable.}
+      - {name: is_delivered, data_type: boolean, constraints: [{type: not_null}], description: Status delivered with a delivery date.}
+      - {name: is_late, data_type: boolean, description: Delivered after the estimated date; NULL if not delivered.}
+      - {name: used_voucher, data_type: boolean, constraints: [{type: not_null}], description: At least one voucher payment.}
+      - {name: primary_payment_type, data_type: text, description: Instrument covering the largest share; NULL if no payment.}
+      - name: purchased_at
+        data_type: timestamp
+        constraints: [{type: not_null}]
+        description: Purchase timestamp.
+        data_tests: [not_in_future]
+      - name: approved_at
+        data_type: timestamp
+        description: Payment approval.
+        data_tests:
+          - timeline_is_ordered: {arguments: {must_not_precede: purchased_at}}
+          # 14 real delivered orders lack an approval timestamp: reported, never blocking
+          - not_null:
+              config: {where: is_delivered, severity: warn, meta: {dq_severity: WARNING}}
+      - name: delivered_to_carrier_at
+        data_type: timestamp
+        description: Hand-off to carrier.
+        data_tests:
+          # 166 real source records (docs/source_profile.md): reported, never blocking
+          - timeline_is_ordered:
+              arguments: {must_not_precede: purchased_at}
+              config: {severity: warn, meta: {dq_severity: WARNING}}
+      - name: delivered_to_customer_at
+        data_type: timestamp
+        description: Delivery to customer.
+        data_tests:
+          - not_in_future
+          - timeline_is_ordered: {arguments: {must_not_precede: purchased_at}}
+      - {name: estimated_delivery_date, data_type: date, constraints: [{type: not_null}], description: Promised delivery date.}
+      - {name: item_count, data_type: bigint, constraints: [{type: not_null}], description: Items in the order (additive).}
+      - {name: seller_count, data_type: bigint, constraints: [{type: not_null}], description: Distinct sellers (not additive across orders).}
+      - {name: items_value, data_type: "numeric(12,2)", constraints: [{type: not_null}], description: Sum of item prices, BRL (additive).}
+      - {name: freight_value, data_type: "numeric(12,2)", constraints: [{type: not_null}], description: Sum of item freight, BRL (additive).}
+      - {name: order_value, data_type: "numeric(12,2)", constraints: [{type: not_null}], description: items_value + freight_value (additive).}
+      - {name: payment_value, data_type: "numeric(12,2)", constraints: [{type: not_null}], description: Sum of payments, BRL (additive).}
+      - name: payment_count
+        data_type: bigint
+        constraints: [{type: not_null}]
+        description: Payment instruments used (additive).
+        data_tests:
+          # 1 real non-canceled order has no payment record: reported, never blocking
+          - accepted_range:
+              arguments: {min_value: 1}
+              config: {where: not is_canceled, severity: warn, meta: {dq_severity: WARNING}}
+      - {name: max_installments, data_type: integer, description: Max instalments (non-additive).}
+      - {name: purchase_to_approval_days, data_type: "numeric(8,2)", description: Non-additive duration.}
+      - {name: purchase_to_carrier_days, data_type: "numeric(8,2)", description: Non-additive duration.}
+      - {name: delivery_lead_days, data_type: "numeric(8,2)", description: Purchase to delivery, days (non-additive).}
+      - {name: estimated_lead_days, data_type: integer, description: Promised lead time, days (non-additive).}
+      - {name: days_vs_estimate, data_type: integer, description: Delivery date minus estimate; >0 = late (non-additive).}
+      - {name: review_count, data_type: bigint, description: Reviews received (additive).}
+      - {name: avg_review_score, data_type: "numeric(3,2)", description: Average score of the order's reviews (non-additive).}
+
+  - name: fct_order_items
+    description: >
+      Business process: sale of a product by a seller. Grain: one row per order line
+      (order_id, order_item_id). Additive: price, freight_value, item_total. Quantity is the
+      row count (the source repeats lines instead of storing a quantity).
+    config:
+      contract: {enforced: true}
+      indexes:
+        - {columns: [seller_id]}
+        - {columns: [product_id]}
+    constraints:
+      - {type: primary_key, columns: [order_id, order_item_id]}
+      - {type: foreign_key, columns: [order_id], to: ref('fct_orders'), to_columns: [order_id]}
+      - {type: foreign_key, columns: [product_id], to: ref('dim_product'), to_columns: [product_id]}
+      - {type: foreign_key, columns: [seller_id], to: ref('dim_seller'), to_columns: [seller_id]}
+      - {type: foreign_key, columns: [customer_unique_id], to: ref('dim_customer'), to_columns: [customer_unique_id]}
+      - {type: foreign_key, columns: [purchase_date_key], to: ref('dim_date'), to_columns: [date_key]}
+      - {type: foreign_key, columns: [shipping_limit_date_key], to: ref('dim_date'), to_columns: [date_key]}
+    columns:
+      - {name: order_id, data_type: text, constraints: [{type: not_null}], description: FK fct_orders.}
+      - {name: order_item_id, data_type: integer, constraints: [{type: not_null}], description: Line number within the order.}
+      - name: product_id
+        data_type: text
+        constraints: [{type: not_null}]
+        description: FK dim_product.
+        data_tests:
+          - relationships: {arguments: {to: ref('dim_product'), field: product_id}}
+      - name: seller_id
+        data_type: text
+        constraints: [{type: not_null}]
+        description: FK dim_seller.
+        data_tests:
+          - relationships: {arguments: {to: ref('dim_seller'), field: seller_id}}
+      - {name: customer_unique_id, data_type: text, constraints: [{type: not_null}], description: FK dim_customer.}
+      - {name: purchase_date_key, data_type: integer, constraints: [{type: not_null}], description: FK dim_date.}
+      - {name: shipping_limit_date_key, data_type: integer, constraints: [{type: not_null}], description: FK dim_date.}
+      - {name: is_canceled, data_type: boolean, constraints: [{type: not_null}], description: Parent order canceled/unavailable.}
+      - {name: shipped_after_limit, data_type: boolean, description: Carrier hand-off after the seller's shipping limit.}
+      - name: price
+        data_type: "numeric(12,2)"
+        constraints: [{type: not_null}]
+        description: Item price, BRL (additive).
+        data_tests:
+          - accepted_range:
+              arguments: {min_value: 0, inclusive: false}
+              config: {meta: {dq_severity: ERROR, tolerance: 0}}
+      - name: freight_value
+        data_type: "numeric(12,2)"
+        constraints: [{type: not_null}]
+        description: Item freight, BRL (additive).
+        data_tests:
+          - accepted_range:
+              arguments: {min_value: 0}
+              config: {meta: {dq_severity: ERROR, tolerance: 0}}
+      - {name: item_total, data_type: "numeric(12,2)", constraints: [{type: not_null}], description: price + freight (additive).}
+
+  - name: fct_payments
+    description: >
+      Business process: payment of an order. Grain: one row per payment instrument within an
+      order (order_id, payment_sequential). Additive: payment_value. Non-additive:
+      payment_installments.
+    config:
+      contract: {enforced: true}
+    constraints:
+      - {type: primary_key, columns: [order_id, payment_sequential]}
+      - {type: foreign_key, columns: [order_id], to: ref('fct_orders'), to_columns: [order_id]}
+      - {type: foreign_key, columns: [customer_unique_id], to: ref('dim_customer'), to_columns: [customer_unique_id]}
+      - {type: foreign_key, columns: [purchase_date_key], to: ref('dim_date'), to_columns: [date_key]}
+    columns:
+      - {name: order_id, data_type: text, constraints: [{type: not_null}], description: FK fct_orders.}
+      - {name: payment_sequential, data_type: integer, constraints: [{type: not_null}], description: Instrument sequence.}
+      - {name: customer_unique_id, data_type: text, constraints: [{type: not_null}], description: FK dim_customer.}
+      - {name: purchase_date_key, data_type: integer, constraints: [{type: not_null}], description: FK dim_date (order purchase date).}
+      - name: payment_type
+        data_type: text
+        constraints: [{type: not_null}]
+        description: Payment method (degenerate dimension).
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [credit_card, boleto, voucher, debit_card, not_defined]
+              config: {meta: {dq_severity: ERROR, tolerance: 0}}
+      - {name: is_canceled, data_type: boolean, constraints: [{type: not_null}], description: Parent order canceled/unavailable.}
+      - {name: payment_installments, data_type: integer, constraints: [{type: not_null}], description: Instalments (non-additive).}
+      - name: payment_value
+        data_type: "numeric(12,2)"
+        constraints: [{type: not_null}]
+        description: Amount, BRL (additive).
+        data_tests:
+          - accepted_range:
+              arguments: {min_value: 0}
+              config: {meta: {dq_severity: ERROR, tolerance: 0}}
+
+  - name: fct_reviews
+    description: >
+      Business process: post-purchase satisfaction survey. Grain: one row per
+      (review_id, order_id) - review_id alone is not unique in the source. Non-additive:
+      review_score (average it), response_days.
+    config:
+      contract: {enforced: true}
+      indexes:
+        - {columns: [order_id]}
+    constraints:
+      - {type: primary_key, columns: [review_id, order_id]}
+      - {type: foreign_key, columns: [order_id], to: ref('fct_orders'), to_columns: [order_id]}
+      - {type: foreign_key, columns: [customer_unique_id], to: ref('dim_customer'), to_columns: [customer_unique_id]}
+      - {type: foreign_key, columns: [review_sent_date_key], to: ref('dim_date'), to_columns: [date_key]}
+      - {type: foreign_key, columns: [review_answered_date_key], to: ref('dim_date'), to_columns: [date_key]}
+    columns:
+      - {name: review_id, data_type: text, constraints: [{type: not_null}], description: Survey response id.}
+      - {name: order_id, data_type: text, constraints: [{type: not_null}], description: FK fct_orders.}
+      - {name: customer_unique_id, data_type: text, constraints: [{type: not_null}], description: FK dim_customer.}
+      - {name: review_sent_date_key, data_type: integer, constraints: [{type: not_null}], description: FK dim_date.}
+      - {name: review_answered_date_key, data_type: integer, constraints: [{type: not_null}], description: FK dim_date.}
+      - name: review_score
+        data_type: integer
+        constraints: [{type: not_null}]
+        description: 1 (worst) to 5 (best), non-additive.
+        data_tests:
+          - accepted_values:
+              arguments: {values: [1, 2, 3, 4, 5], quote: false}
+              config: {meta: {dq_severity: ERROR, tolerance: 0}}
+      - {name: has_comment, data_type: boolean, constraints: [{type: not_null}], description: Non-empty free-text comment.}
+      - {name: has_title, data_type: boolean, constraints: [{type: not_null}], description: Comment title present.}
+      - {name: order_was_late, data_type: boolean, description: The reviewed order was delivered late.}
+      - {name: response_days, data_type: "numeric(8,2)", description: Survey sent to answered, days (non-additive).}

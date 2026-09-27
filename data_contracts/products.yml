@@ -1,0 +1,89 @@
+contract_version: 1
+table: products
+file: olist_products_dataset.csv
+dataset_version: 2
+owner: data-platform
+description: >
+  Product catalogue: Portuguese category name and physical attributes used for freight.
+  Two source column names are misspelled ("lenght") and are renamed in src.
+grain: One record per product (product_id).
+primary_key: [product_id]
+max_reject_ratio: 0.01
+format: {encoding: utf-8, line_terminator: LF}
+
+columns:
+  - name: product_id
+    type: text
+    nullable: false
+    unique: true
+    max_length: 32
+    pattern: '^[0-9a-f]{32}$'
+    description: Anonymised product identifier. Primary key.
+  - name: product_category_name
+    type: text
+    nullable: true
+    description: Portuguese category name. Empty for some products (category unknown).
+  - name: product_name_lenght
+    target_name: product_name_length
+    type: integer
+    nullable: true
+    description: Number of characters in the product name (source column name is misspelled).
+  - name: product_description_lenght
+    target_name: product_description_length
+    type: integer
+    nullable: true
+    description: Number of characters in the description (source column name is misspelled).
+  - name: product_photos_qty
+    type: integer
+    nullable: true
+    description: Number of published product photos.
+  - name: product_weight_g
+    type: integer
+    nullable: true
+    description: Weight in grams.
+  - name: product_length_cm
+    type: integer
+    nullable: true
+    description: Package length in centimetres.
+  - name: product_height_cm
+    type: integer
+    nullable: true
+    description: Package height in centimetres.
+  - name: product_width_cm
+    type: integer
+    nullable: true
+    description: Package width in centimetres.
+
+foreign_keys:
+  - columns: [product_category_name]
+    references: {table: product_category_translation, columns: [product_category_name]}
+    severity: WARNING
+    description: >
+      Categories without an English translation keep their Portuguese name in dim_product
+      instead of being dropped.
+
+rules:
+  - name: weight_non_negative
+    check: range
+    column: product_weight_g
+    min: 0
+    severity: ERROR
+    description: Negative weight is invalid.
+  - name: weight_positive
+    check: range
+    column: product_weight_g
+    min: 1
+    severity: WARNING
+    description: Zero weight is observed and physically implausible; flagged for freight analysis.
+  - name: dimensions_positive
+    check: expression
+    columns: [product_length_cm, product_height_cm, product_width_cm]
+    sql: product_length_cm > 0 AND product_height_cm > 0 AND product_width_cm > 0
+    severity: ERROR
+    description: Package dimensions must be positive when present.
+  - name: photos_non_negative
+    check: range
+    column: product_photos_qty
+    min: 0
+    severity: ERROR
+    description: Photo count cannot be negative.
