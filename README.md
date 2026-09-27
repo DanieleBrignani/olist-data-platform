@@ -1,6 +1,6 @@
 # Production Data Platform — Olist Brazilian E-Commerce
 
-> **Build status: Phase 12 of 14 (benchmark).** Sections marked *pending* are filled in by
+> **Build status: Phase 13 of 14 (documentation).** Sections marked *pending* are filled in by
 > the phase that produces their evidence. No section contains numbers that have not been
 > measured by code in this repository.
 
@@ -50,11 +50,34 @@ Measured by `scripts/benchmark.py` on 2026-09-27 (commit `dee7d90`), real Olist 
 
 ## 5. Architecture Diagram
 
-See [docs/architecture.md](docs/architecture.md). Decisions are in [docs/adr/](docs/adr/README.md).
+```mermaid
+flowchart LR
+    K[("Kaggle<br/>Olist v2")] -->|download once| R["data/raw<br/>read-only CSVs<br/>+ checksum lock"]
+    subgraph PG["PostgreSQL 16 (olist_dw)"]
+        direction LR
+        RAW["raw<br/>verbatim text<br/>+ lineage"] --> SRC["src<br/>typed, PK/FK/CHECK"]
+        SRC --> STG["stg / int<br/>dbt views"] --> WB["warehouse_build<br/>dims + facts"] --> MB["marts_build<br/>business marts"]
+        META[("meta<br/>runs, files, events<br/>quarantine, dq results")]
+        WB -. "atomic swap<br/>if gate PASS" .-> W["warehouse"]
+        MB -. "atomic swap<br/>if gate PASS" .-> M["marts"]
+    end
+    R -->|verify, validate, COPY| RAW
+    M --> BI["analysts / BI<br/>(olist_reporting, read-only)"]
+    W --> BI
+    subgraph OPS["Operations"]
+        PF["Prefect flow<br/>olist_refresh"]
+        EX["metrics exporter<br/>(olist_monitor)"] --> PR["Prometheus<br/>+ alert rules"] --> GR["Grafana"]
+    end
+    PF -. orchestrates .-> PG
+    META --> EX
+```
+
+Components, schemas and roles: [docs/architecture.md](docs/architecture.md). Every decision has
+an ADR: [docs/adr/](docs/adr/README.md).
 
 ## 6. Data Flow
 
-Implemented so far (Phases 3–5); later phases extend this section.
+The ten steps of the `olist_refresh` flow, in order:
 
 | Step | What happens | On failure |
 |------|--------------|------------|
@@ -63,6 +86,11 @@ Implemented so far (Phases 3–5); later phases extend this section.
 | `validate_source` | checks every file's encoding and header against its contract **before any DB write** | breaking change → `DataContractError` |
 | `ingest_raw` | streams each file (csv → `COPY`) into `raw.<table>` in one transaction per file, with lineage (`_source_file_id`, `_row_number`, `_pipeline_run_id`); structurally broken records go to `meta.rejected_records`; loaded + rejected must equal the locked row count | reject ratio over the contract limit → file rolled back, evidence kept |
 | `load_staging` | rebuilds all `src.*` typed tables in **one transaction** from the latest loaded file per table. It checks types, not-nulls, patterns, contract rules, key conflicts and foreign keys. ERROR records are quarantined, WARNING records are flagged and kept, exact duplicates are collapsed with a count. See [docs/database_design.md](docs/database_design.md) | a reject ratio over the contract limit → `src` untouched, evidence committed, `DataContractError` |
+| `dbt_build` | builds 17 views (`stg`, `int`) and 16 tables into `warehouse_build` / `marts_build`, with enforced contracts (real PK/FK) | model error → `DbtError`, not retried |
+| `dbt_test` | 36 classified tests; failing rows stored in `dq_failures` | test failures are data, judged by the gate |
+| `quality_gate` | CRITICAL, or ERROR above its tolerance → FAIL; results, sample rows and decision recorded | FAIL → run stops, nothing published |
+| `publish_marts` | one transaction: `*_build` → `warehouse`/`marts`, previous version kept as `*_prev`, reporting grants moved | lock timeout → retried |
+| `publish_metrics` | run summary from the metadata tables, emitted as a structured event | – |
 
 Every run is recorded in `meta.pipeline_runs`, every file in `meta.source_files`
 (unique on `(source_table, sha256)`), and every step in `meta.ingestion_events`.
@@ -203,10 +231,36 @@ docker compose -p olistbench down -v
 ```
 
 ## 13. Engineering Decisions
-See [docs/adr/](docs/adr/README.md).
+
+Each decision is an ADR with context, alternatives rejected and consequences: [docs/adr/](docs/adr/README.md).
+
+| ADR | Decision | Why (in one line) |
+|-----|----------|-------------------|
+| 0001 | One PostgreSQL, one schema per layer | FKs, dbt refs and the atomic publish swap all need one transaction; runs anywhere with Docker |
+| 0002 | Immutable raw files pinned by a committed checksum lock | the data cannot be committed (licence, size), so the lock is what makes runs reproducible |
+| 0003 | Prefect 3; retries decided by error type | typed retry conditions, the same flow runs in tests, lighter than Airflow on an 8 GB host |
+| 0004 | WARNING / ERROR / CRITICAL at three checkpoints; GE/Soda evaluated and not adopted | one vocabulary, one gate; a second DQ framework would duplicate checks without a new guarantee |
+| 0005 | Build into `*_build`, publish by atomic schema swap | a failed gate leaves consumers on the previous good version; rollback is a rename |
+| 0006 | Full refresh, no incremental dbt models | static snapshot with no `updated_at`; determinism over speed (cost measured in section 12) |
+| 0007 | Metrics derived from append-only metadata tables, not Pushgateway | counters stay monotonic across batch processes and agree with SQL |
+| 0008 | Idempotent ingestion keyed by file sha256 | reruns are recorded no-ops; forced reloads replace, never duplicate |
+| 0009 | Five least-privilege roles | a leaked reporting credential cannot read unpublished data or write anything |
+| 0010 | No BI tool in the core stack | the consumption contract is the `marts` schema + reporting role |
+| 0011 | Source ids as dimension keys, no SCD2 | a single snapshot has no history; SCD2 would be fabricated |
 
 ## 14. Trade-offs
-*Pending (Phase 13).*
+
+| Choice | What it buys | What it costs (measured where possible) |
+|--------|--------------|------------------------------------------|
+| Full refresh of `src` and dbt on every run | deterministic, byte-identical results; no merge logic to get wrong | a rerun with unchanged files costs most of an initial load (section 4); staging is the first optimisation target |
+| Verbatim `raw` copy with lineage | every quarantined record is traceable to its file, row number and original text | `raw` is roughly a third of the database size (section 12) |
+| Streaming csv → `COPY` in Python instead of server-side `COPY FROM file` | per-record quarantine: one bad line does not abort a 1 M-row file | slower than a native bulk load; still about 73k rows/s here |
+| Custom contract engine instead of Great Expectations/Soda | one severity model and one quarantine table from file to warehouse | code to own and test (staging engine 99% covered) |
+| Enforced dbt contracts with real PK/FK | the database rejects a broken transformation; column drift fails the build | every column type declared twice (SQL + YAML) |
+| Build-then-swap publication | consumers never see a partial or failed build; instant rollback | needs an exclusive lock for the rename; long reports can delay publication (bounded by `lock_timeout`) |
+| Metrics from metadata tables | durable, restart-proof, auditable counters | scrape cost grows with history; logs are not in Grafana (no Loki) |
+| Natural keys, SCD1 | stable keys across rebuilds and versions | no attribute history if the source ever becomes a change feed |
+| PostgreSQL (row store) | one engine for constraints, roles, plans and tests | full-history aggregations are slower than on a columnar engine; mitigated by marts |
 
 ## 15. Failure Cases
 
@@ -229,32 +283,75 @@ Each case is injected by an automated test, and the platform's response is asser
 | Metadata DB unreachable | metrics exporter | scrape succeeds with `olist_exporter_db_up 0`, and an alert fires |
 
 ## 16. What Failed and What I Changed
-*Kept as a running log while the phases are built. Filled in during Phase 13.*
+
+28 things failed or were caught during the build. Each is logged with its root cause and the
+change it led to: [docs/what-failed.md](docs/what-failed.md). The ones that changed the design:
+
+* **Real data broke naive assumptions.** The category file starts with a UTF-8 BOM (a naive
+  header check reports a false breaking change); zip codes have significant leading zeros;
+  `review_id` is not unique. Contracts now declare encoding per file, zips are text, and the
+  review grain is `(review_id, order_id)`.
+* **Least privilege caught me four times.** No TEMP privilege for staging; no cascade drop for
+  migrations; the admin role unable to read dbt output; demoted `*_prev` schemas still readable
+  by reporting. Each time the fix was an explicit, minimal grant or a revoke, never a broader
+  role.
+* **Staging was 5x too slow.** Expanding every record once per check (10 M rows for
+  geolocation) was replaced by a boolean prefilter: 15.8 s → 2.9 s, identical output.
+* **Observability that looked fine was wrong.** Metrics logged as `"Decimal('0')"` strings,
+  third-party lines broke the JSON log file, and a Grafana table hid all flagged records behind
+  an empty first query. The last one was only visible by opening the dashboard.
+* **Reproducibility leaks.** Grafana downloaded and auto-updated plugins at every start (now
+  pinned and baked in); Linux CI would have failed on file ownership invisible on Docker
+  Desktop (caught by simulating the runner); the benchmark would have recorded no commit.
+* **Tests that were wrong, not the code.** Three times a test expectation was incomplete and
+  the system was right: a quarantine cascade, a second legitimately reported rule, and
+  date-grained vs timestamp-grained counts (60 vs 63).
 
 ## 17. Known Limitations
-*Pending (Phase 14).*
+
+Consolidated in Phase 14 (production-readiness review). Current list:
+
+* **Single node:** one PostgreSQL instance and one Prefect worker; no replication, no HA.
+* **Static snapshot:** Olist v2 ends in 2018 with incomplete edge months (flagged, not hidden).
+  Freshness therefore measures publication, not business recency.
+* **Full refresh:** rerun cost is close to initial-load cost (section 12).
+* **Timestamps have no time zone** in the source; they are treated as Brazilian local time
+  (documented assumption).
+* **Local-only monitoring extras:** alerts are evaluated but not routed (no Alertmanager); logs
+  stay in files (no Loki); Grafana allows anonymous *viewer* access on localhost.
+* **CI:** only the `test` job has been rehearsed locally; the workflow has not yet run on GitHub.
+* **Benchmark host:** timings come from a memory-constrained laptop and are comparable only with
+  each other.
 
 ## 18. How to Run
 
-Prerequisites: Docker with Compose v2. No local Python is needed.
+Prerequisites: Docker with Compose v2, and any Python 3 (standard library only) to generate
+`.env`. Everything else runs in containers.
 
 ```bash
-python scripts/make_env.py  # creates .env from .env.example with random secrets
+# 1. configuration: random secrets, never committed
+python scripts/make_env.py
+
+# 2. database + migrations
 docker compose up -d --wait postgres
 docker compose up --build migrate
-docker compose run --rm dev olist doctor
-docker compose run --rm dev olist source fetch            # ~126 MB from Kaggle, read-only
-docker compose run --rm dev olist contracts check-source  # exit 1 on breaking schema change
-docker compose run --rm dev olist ingest                  # rerun = no-op; --force-reload to replace
-docker compose run --rm dev olist stage                   # raw -> typed src, one transaction
-docker compose run --rm dev olist transform               # dbt build -> warehouse_build, marts_build
-docker compose run --rm dev olist warehouse               # dbt run -> dbt test -> quality gate -> publish
-docker compose run --rm dev olist rollback-publish        # swap back to the previous publication
-docker compose up -d prefect-server pipeline-worker      # orchestration (UI: http://localhost:4200)
+
+# 3. the whole pipeline, orchestrated (download → ... → publish), once
+docker compose run --rm dev olist source fetch      # ~126 MB from Kaggle, verified, read-only
+docker compose run --rm dev olist run               # the olist_refresh flow
+
+# 4. operate it as a service + observe it
+docker compose up -d prefect-server pipeline-worker metrics-exporter prometheus grafana
 docker compose exec pipeline-worker prefect deployment run olist_refresh/olist-refresh
-docker compose up -d metrics-exporter prometheus grafana  # metrics :9108, Prometheus :9090, Grafana :3000
-docker compose run --rm dev python scripts/explain_queries.py  # regenerates docs/query_plans.md
+#    Prefect UI http://localhost:4200 · Grafana http://localhost:3000 · Prometheus http://localhost:9090
+
+# 5. consume: business report from the published marts (reporting role)
+docker compose run --rm dev python scripts/business_report.py
 ```
+
+Individual steps are also CLI commands (`olist ingest | stage | transform | warehouse |
+rollback-publish | fingerprint | exporter`); `docker compose run --rm dev olist --help` lists
+them.
 
 ## 19. How to Test
 
@@ -283,4 +380,42 @@ GitHub Actions (`.github/workflows/ci.yml`) runs four jobs:
 Details: [docs/ci.md](docs/ci.md).
 
 ## 20. Final Answer to the Business Question
-*Written in Phase 13, based on the measured results.*
+
+**How can fragmented ecommerce operational data be transformed into a trusted, analytics-ready
+data warehouse that can be safely refreshed and used for business reporting?**
+
+By treating trust as something the platform *proves on every run* rather than assumes:
+
+1. **Pin the input.** The nine files are checksum-locked; a changed byte stops the run before
+   anything is written.
+2. **Make the rules explicit.** Every file has a contract, and every rule has a severity.
+   Invalid records are never silently dropped: they are quarantined with rule, severity, run
+   and reason (0 quarantined, 542 flagged on Olist v2).
+3. **Model for the questions asked.** A star schema at the true grains (person, not per-order
+   customer id; four facts, no fan-out), with the database itself enforcing keys, and marts
+   that answer reporting questions in milliseconds.
+4. **Gate publication.** 36 classified tests; a CRITICAL failure blocks the atomic swap, so
+   consumers only ever see a complete, validated version, and rollback is one command.
+5. **Make refreshes safe and boring.** Reruns are idempotent (byte-identical tables across
+   three real-data runs), retries apply only to transient failures, and every run is measured
+   and alertable.
+
+What the governed warehouse answers today, generated from the published marts:
+
+<!-- BUSINESS:START -->
+Generated by `scripts/business_report.py` from the published marts (reporting role). Full report: [docs/business_metrics.md](docs/business_metrics.md).
+
+| Business question | Answer from the governed warehouse |
+|---|---|
+| How much was sold? | 99,441 orders, GMV R$ 15,735,527.03, AOV R$ 160.24, 2016-09-04 to 2018-10-17 |
+| How reliable is delivery? | median lead time 10.2 days vs 24.4 promised; 6.8% of deliveries late |
+| Does lateness matter? | late orders average 2.27 stars vs 4.29 on time; 62.4% of late orders score 1-2 vs 9.3% |
+| Do customers come back? | 3.0% of 96,096 customers placed more than one order |
+| How concentrated are sellers? | the top 10% of 3,095 sellers earn 67.6% of revenue |
+| Which periods are unreliable? | 2016-12, 2018-09, 2018-10: incomplete edge months, flagged automatically |
+<!-- BUSINESS:END -->
+
+The most actionable finding is one no single source file contains: **late deliveries cost
+satisfaction far more than they cost time**. They are a minority of deliveries, yet most of
+them end in a 1-2 star review. It took joining orders, deliveries and reviews at the right
+grain, with the right definition of "late", to see it, which is the point of the platform.
