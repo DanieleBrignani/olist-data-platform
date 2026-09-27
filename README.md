@@ -1,9 +1,5 @@
 # Production Data Platform — Olist Brazilian E-Commerce
 
-> **Build status: Phase 13 of 14 (documentation).** Sections marked *pending* are filled in by
-> the phase that produces their evidence. No section contains numbers that have not been
-> measured by code in this repository.
-
 ## 1. Business Question
 
 **How can fragmented ecommerce operational data be transformed into a trusted,
@@ -147,7 +143,7 @@ Three checkpoints share one severity vocabulary (WARNING / ERROR / CRITICAL):
    before any write.
 2. **Record checks (raw → src):** contract rules. ERROR records are quarantined, WARNING
    records are flagged, and both are stored with rule, severity, run id, timestamp and reason.
-3. **Model checks (dbt, 40+ tests):** including CRITICAL reconciliation of `src` against the
+3. **Model checks (36 dbt tests):** including CRITICAL reconciliation of `src` against the
    warehouse to the cent, marts against facts, and cross-file timeline invariants.
 
 A **quality gate** turns the dbt results into PASS/FAIL. CRITICAL failures, and ERROR
@@ -284,7 +280,7 @@ Each case is injected by an automated test, and the platform's response is asser
 
 ## 16. What Failed and What I Changed
 
-28 things failed or were caught during the build. Each is logged with its root cause and the
+32 things failed or were caught during the build. Each is logged with its root cause and the
 change it led to: [docs/what-failed.md](docs/what-failed.md). The ones that changed the design:
 
 * **Real data broke naive assumptions.** The category file starts with a UTF-8 BOM (a naive
@@ -309,19 +305,28 @@ change it led to: [docs/what-failed.md](docs/what-failed.md). The ones that chan
 
 ## 17. Known Limitations
 
-Consolidated in Phase 14 (production-readiness review). Current list:
+Final list from the production-readiness review ([docs/production_readiness.md](docs/production_readiness.md),
+which also has the risk register and the path to a real production deployment).
 
-* **Single node:** one PostgreSQL instance and one Prefect worker; no replication, no HA.
-* **Static snapshot:** Olist v2 ends in 2018 with incomplete edge months (flagged, not hidden).
-  Freshness therefore measures publication, not business recency.
-* **Full refresh:** rerun cost is close to initial-load cost (section 12).
-* **Timestamps have no time zone** in the source; they are treated as Brazilian local time
-  (documented assumption).
-* **Local-only monitoring extras:** alerts are evaluated but not routed (no Alertmanager); logs
-  stay in files (no Loki); Grafana allows anonymous *viewer* access on localhost.
-* **CI:** only the `test` job has been rehearsed locally; the workflow has not yet run on GitHub.
-* **Benchmark host:** timings come from a memory-constrained laptop and are comparable only with
-  each other.
+* **Single node, no backups:** one PostgreSQL instance, one Prefect worker, no replication.
+  The warehouse can be fully rebuilt from the locked raw files, but metadata history
+  (runs, quarantine) would be lost with the volume.
+* **CI has not yet run on GitHub:** the workflow passes `actionlint`, and its `test` job was
+  rehearsed on a clean checkout as a Linux-style uid, but the repository has not been pushed.
+* **Full refresh:** a rerun costs most of an initial load; `load_staging` is the bottleneck (§12).
+* **Static, historical snapshot:** Olist v2 ends in 2018, with incomplete edge months
+  (flagged, not hidden). "Freshness" measures publication, not business recency.
+* **Source timestamps have no time zone;** treated as Brazilian local time (documented
+  assumption).
+* **Local-only operations extras:** alerts are evaluated but not routed (no Alertmanager); logs
+  stay in stdout/files (no Loki); Prefect and Grafana have no authentication (ports bound to
+  127.0.0.1, Grafana anonymous *viewer* only).
+* **Metadata retention:** `meta.*` tables grow with every run; no retention policy yet.
+* **Benchmark numbers** come from a memory-constrained laptop; they are comparable with each
+  other, not absolute.
+* **Some warehouse indexes are unmeasured:** only `fct_order_items(seller_id)` has a measured
+  warehouse query; the `src` indexes are justified with before/after plans in
+  [docs/query_plans.md](docs/query_plans.md).
 
 ## 18. How to Run
 
@@ -349,6 +354,8 @@ docker compose exec pipeline-worker prefect deployment run olist_refresh/olist-r
 docker compose run --rm dev python scripts/business_report.py
 ```
 
+Operations (failure investigation, rollback, reloads, environment comparison): the runbook in [docs/production_readiness.md](docs/production_readiness.md#6-runbook).
+
 Individual steps are also CLI commands (`olist ingest | stage | transform | warehouse |
 rollback-publish | fingerprint | exporter`); `docker compose run --rm dev olist --help` lists
 them.
@@ -356,8 +363,8 @@ them.
 ## 19. How to Test
 
 ```bash
-docker compose run --rm dev pytest                       # all 233 tests (93% line coverage)
-docker compose run --rm dev pytest -m "not source_data"  # without the real dataset (219 tests)
+docker compose run --rm dev pytest                       # all 239 tests (92% line coverage)
+docker compose run --rm dev pytest -m "not source_data"  # without the real dataset (225 tests)
 docker compose run --rm dev pytest -m source_data        # real-data e2e + idempotency (3 full runs)
 docker compose run --rm --no-deps dev sh -c "ruff check . && ruff format --check ."
 ```
@@ -371,7 +378,7 @@ each required category to its tests: [docs/testing.md](docs/testing.md).
 
 GitHub Actions (`.github/workflows/ci.yml`) runs four jobs:
 * **lint:** ruff lint and format, `promtool`, `actionlint`.
-* **test:** reversible migrations, contracts, `dbt compile`, and 219 tests with the dbt tests
+* **test:** reversible migrations, contracts, `dbt compile`, and 225 tests with the dbt tests
   inside.
 * **real-data:** the full pipeline on the real dataset. A CRITICAL data-quality failure exits 1
   and fails CI.

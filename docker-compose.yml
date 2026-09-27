@@ -1,5 +1,12 @@
 name: olist-platform
 
+x-logging: &logging
+  # stdout is the primary log sink; bound its size so a long-running stack cannot fill the disk
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 x-app-environment: &app-environment
   POSTGRES_HOST: postgres
   POSTGRES_PORT: "5432"
@@ -12,6 +19,7 @@ x-app-env: &app-env
 
 services:
   postgres:
+    logging: *logging
     image: postgres:16.10-bookworm
     # Docker's default /dev/shm is 64 MB; parallel hash joins from concurrent dbt threads
     # exhausted it ("could not resize shared memory segment", docs/what-failed.md)
@@ -35,12 +43,13 @@ services:
 
   # One-shot: applies Alembic migrations as the admin role, then exits 0.
   migrate:
+    logging: *logging
     <<: *app-env
     build:
       context: .
       dockerfile: docker/app.Dockerfile
       target: runtime
-    image: olist-platform:runtime
+    image: ${OLIST_IMAGE_PREFIX:-olist-platform}:runtime
     command: ["db", "upgrade"]
     depends_on:
       postgres:
@@ -49,12 +58,13 @@ services:
 
   # Interactive tooling / tests: `docker compose run --rm dev pytest`
   dev:
+    logging: *logging
     <<: *app-env
     build:
       context: .
       dockerfile: docker/app.Dockerfile
       target: dev
-    image: olist-platform:dev
+    image: ${OLIST_IMAGE_PREFIX:-olist-platform}:dev
     # The repo is bind-mounted: on Linux (CI) the container must run as the uid that owns the
     # checkout or it cannot write dbt/target, logs or data. Docker Desktop hides this locally.
     user: "${DEV_UID:-10001}:${DEV_GID:-10001}"
@@ -71,6 +81,7 @@ services:
   # Prefect API + UI (http://localhost:4200). Metadata in its own database `prefect` on the
   # same instance, isolated from the warehouse (ADR-0001/0003).
   prefect-server:
+    logging: *logging
     image: prefecthq/prefect:3.8.6-python3.12
     command: ["prefect", "server", "start", "--host", "0.0.0.0", "--port", "4200"]
     environment:
@@ -79,7 +90,7 @@ services:
       PREFECT_SERVER_ANALYTICS_ENABLED: "false"
       PREFECT_LOGGING_LEVEL: WARNING
     ports:
-      - "127.0.0.1:4200:4200"
+      - "127.0.0.1:${PREFECT_HOST_PORT:-4200}:4200"
     depends_on:
       postgres:
         condition: service_healthy
@@ -93,13 +104,25 @@ services:
 
   # Serves the `olist-refresh` deployment and executes its runs (orchestration/serve.py).
   pipeline-worker:
-    image: olist-platform:runtime
+    logging: *logging
+    build:
+      context: .
+      dockerfile: docker/app.Dockerfile
+      target: runtime
+    image: ${OLIST_IMAGE_PREFIX:-olist-platform}:runtime
     env_file: .env
     environment:
       <<: *app-environment
       PREFECT_API_URL: http://prefect-server:4200/api
       PREFECT_LOGGING_EXTRA_LOGGERS: olist_platform,orchestration
     entrypoint: ["python", "-m", "orchestration.serve"]
+    healthcheck:
+      # healthy = the worker can reach the orchestration API it serves the deployment to
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://prefect-server:4200/api/health', timeout=4)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -112,12 +135,17 @@ services:
 
   # Prometheus metrics derived from the meta.* tables (read-only monitor role, ADR-0007)
   metrics-exporter:
-    image: olist-platform:runtime
+    logging: *logging
+    build:
+      context: .
+      dockerfile: docker/app.Dockerfile
+      target: runtime
+    image: ${OLIST_IMAGE_PREFIX:-olist-platform}:runtime
     env_file: .env
     environment: *app-environment
     command: ["exporter", "--port", "9108"]
     ports:
-      - "127.0.0.1:9108:9108"
+      - "127.0.0.1:${EXPORTER_HOST_PORT:-9108}:9108"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -129,6 +157,7 @@ services:
     restart: unless-stopped
 
   prometheus:
+    logging: *logging
     image: prom/prometheus:v3.15.0
     command:
       - --config.file=/etc/prometheus/prometheus.yml
@@ -137,8 +166,13 @@ services:
     volumes:
       - ./monitoring/prometheus:/etc/prometheus:ro
       - promdata:/prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
     ports:
-      - "127.0.0.1:9090:9090"
+      - "127.0.0.1:${PROMETHEUS_HOST_PORT:-9090}:9090"
     depends_on:
       metrics-exporter:
         condition: service_healthy
@@ -147,10 +181,11 @@ services:
   # Dashboard provisioned from monitoring/grafana (http://localhost:3000). Anonymous VIEWER
   # access is enabled for the local demo only (port bound to 127.0.0.1); disable in production.
   grafana:
+    logging: *logging
     build:
       context: .
       dockerfile: docker/grafana.Dockerfile
-    image: olist-platform:grafana
+    image: ${OLIST_IMAGE_PREFIX:-olist-platform}:grafana
     environment:
       # Plugins are baked into the image (pinned); never download or auto-update at startup
       GF_PLUGINS_PREINSTALL_DISABLED: "true"
@@ -165,10 +200,17 @@ services:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
       - grafanadata:/var/lib/grafana
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:${GRAFANA_HOST_PORT:-3000}:3000"
     depends_on:
-      - prometheus
+      prometheus:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

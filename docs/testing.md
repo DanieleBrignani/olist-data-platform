@@ -1,8 +1,8 @@
 # Testing
 
-**233 pytest tests** (137 unit, 89 integration, 7 end-to-end) plus **36 dbt data tests** that
+**239 pytest tests** (143 unit, 89 integration, 7 end-to-end) plus **36 dbt data tests** that
 run inside every pipeline execution (Phase 7). Counts come from `pytest --collect-only`.
-**Line coverage: 93%** of `olist_platform` + `orchestration` (measured with pytest-cov on the
+**Line coverage: 92%** of `olist_platform` + `orchestration` (measured with pytest-cov on the
 full suite; the lowest module is the thin CLI wrapper at 59%).
 
 ## How to run

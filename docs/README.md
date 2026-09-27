@@ -17,3 +17,4 @@
 | Benchmark (generated) | [benchmark.md](benchmark.md) |
 | Business metrics (generated) | [business_metrics.md](business_metrics.md) |
 | What failed and what changed | [what-failed.md](what-failed.md) |
+| Production-readiness review, risk register, runbook | [production_readiness.md](production_readiness.md) |

@@ -70,7 +70,7 @@ for the numbers.
 | `ix_src_orders_purchase_ts` | a narrow purchase-date window | keep: a bitmap index scan replaces the full scan |
 | `ix_src_order_reviews_order_id` | reviews of one order (FK lookup) | keep: the largest measured gain; without it every lookup is a full scan |
 | `ix_src_orders_purchase_ts` for **full-history aggregation** (Q3) | monthly revenue over all orders | **the index does not help**: the planner correctly scans every row either way. The bottleneck is the hash join plus a sort for `GROUP BY` that spills to disk under the default `work_mem`. The remedy is pre-aggregation in the marts (Phase 6), not another index |
-| `ix_src_order_items_product_id`, `ix_src_geolocation_zip` | FK / existence-check joins | kept for join paths; to be re-measured on the warehouse in Phase 6 |
+| `ix_src_order_items_product_id`, `ix_src_geolocation_zip` | FK / existence-check joins | kept for join paths. **Not individually re-measured on the warehouse**: the only warehouse index with a measured query is `fct_order_items(seller_id)` (benchmark Q5, sub-millisecond) |
 
 Indexes that were deliberately **not** created:
 * **Low-cardinality columns** (`order_status`, `payment_type`, UF codes): a filter on them
