@@ -1,0 +1,345 @@
+{
+  "environment": {
+    "measured_at": "2026-09-27T17:03:26+00:00",
+    "git_commit": "dee7d90",
+    "python": "3.12.14",
+    "postgres": "16.10 (Debian 16.10-1.pgdg12+1)",
+    "postgres_settings": {
+      "max_parallel_workers_per_gather": "2",
+      "shared_buffers": "163848kB",
+      "work_mem": "4096kB"
+    },
+    "cpus_visible": 16,
+    "memory_visible_gb": 7.5,
+    "dataset": "olistbr/brazilian-ecommerce v2",
+    "host_note": "Windows 11 Pro laptop, Intel Core 7 240H (16 logical CPUs), 15.6 GB RAM (1.8 GB free at start); Docker Desktop (WSL2); other containers running"
+  },
+  "repetitions": [
+    {
+      "initial": {
+        "label": "initial",
+        "total_s": 89.13,
+        "steps_s": {
+          "verify_manifest": 2.255,
+          "validate_source": 0.153,
+          "ingest_raw": 21.128,
+          "load_staging": 37.229,
+          "dbt_build": 25.095,
+          "dbt_test": 3.176,
+          "quality_gate": 0.028,
+          "publish_marts": 0.061
+        },
+        "rows_ingested": 1550922,
+        "files_loaded": 9,
+        "files_skipped": 0,
+        "rows_staged_in": 1550922,
+        "rows_staged_out": 1289091,
+        "quarantined": 0,
+        "flagged": 542,
+        "dq_tests": 36,
+        "dq_warnings": 6,
+        "gate": "PASS"
+      },
+      "rerun": {
+        "label": "rerun",
+        "total_s": 50.329,
+        "steps_s": {
+          "verify_manifest": 0.964,
+          "validate_source": 0.045,
+          "ingest_raw": 0.074,
+          "load_staging": 27.913,
+          "dbt_build": 17.787,
+          "dbt_test": 3.447,
+          "quality_gate": 0.029,
+          "publish_marts": 0.066
+        },
+        "rows_ingested": 0,
+        "files_loaded": 0,
+        "files_skipped": 9,
+        "rows_staged_in": 1550922,
+        "rows_staged_out": 1289091,
+        "quarantined": 0,
+        "flagged": 542,
+        "dq_tests": 36,
+        "dq_warnings": 6,
+        "gate": "PASS"
+      }
+    },
+    {
+      "initial": {
+        "label": "initial",
+        "total_s": 69.237,
+        "steps_s": {
+          "verify_manifest": 0.709,
+          "validate_source": 0.049,
+          "ingest_raw": 20.677,
+          "load_staging": 27.168,
+          "dbt_build": 17.405,
+          "dbt_test": 3.138,
+          "quality_gate": 0.031,
+          "publish_marts": 0.056
+        },
+        "rows_ingested": 1550922,
+        "files_loaded": 9,
+        "files_skipped": 0,
+        "rows_staged_in": 1550922,
+        "rows_staged_out": 1289091,
+        "quarantined": 0,
+        "flagged": 542,
+        "dq_tests": 36,
+        "dq_warnings": 6,
+        "gate": "PASS"
+      },
+      "rerun": {
+        "label": "rerun",
+        "total_s": 82.803,
+        "steps_s": {
+          "verify_manifest": 0.69,
+          "validate_source": 0.047,
+          "ingest_raw": 0.067,
+          "load_staging": 40.041,
+          "dbt_build": 37.088,
+          "dbt_test": 4.75,
+          "quality_gate": 0.03,
+          "publish_marts": 0.085
+        },
+        "rows_ingested": 0,
+        "files_loaded": 0,
+        "files_skipped": 9,
+        "rows_staged_in": 1550922,
+        "rows_staged_out": 1289091,
+        "quarantined": 0,
+        "flagged": 542,
+        "dq_tests": 36,
+        "dq_warnings": 6,
+        "gate": "PASS"
+      }
+    },
+    {
+      "initial": {
+        "label": "initial",
+        "total_s": 107.681,
+        "steps_s": {
+          "verify_manifest": 1.304,
+          "validate_source": 0.117,
+          "ingest_raw": 32.337,
+          "load_staging": 42.484,
+          "dbt_build": 26.865,
+          "dbt_test": 4.483,
+          "quality_gate": 0.023,
+          "publish_marts": 0.063
+        },
+        "rows_ingested": 1550922,
+        "files_loaded": 9,
+        "files_skipped": 0,
+        "rows_staged_in": 1550922,
+        "rows_staged_out": 1289091,
+        "quarantined": 0,
+        "flagged": 542,
+        "dq_tests": 36,
+        "dq_warnings": 6,
+        "gate": "PASS"
+      },
+      "rerun": {
+        "label": "rerun",
+        "total_s": 75.71,
+        "steps_s": {
+          "verify_manifest": 1.379,
+          "validate_source": 0.06,
+          "ingest_raw": 0.114,
+          "load_staging": 38.205,
+          "dbt_build": 28.545,
+          "dbt_test": 7.272,
+          "quality_gate": 0.046,
+          "publish_marts": 0.084
+        },
+        "rows_ingested": 0,
+        "files_loaded": 0,
+        "files_skipped": 9,
+        "rows_staged_in": 1550922,
+        "rows_staged_out": 1289091,
+        "quarantined": 0,
+        "flagged": 542,
+        "dq_tests": 36,
+        "dq_warnings": 6,
+        "gate": "PASS"
+      }
+    }
+  ],
+  "aggregate": {
+    "initial_total_s": {
+      "median": 89.13,
+      "min": 69.24,
+      "max": 107.68
+    },
+    "rerun_total_s": {
+      "median": 75.71,
+      "min": 50.33,
+      "max": 82.8
+    },
+    "dbt_build_s": {
+      "median": 25.09,
+      "min": 17.41,
+      "max": 26.86
+    },
+    "dbt_test_s": {
+      "median": 3.18,
+      "min": 3.14,
+      "max": 4.48
+    },
+    "ingest_rows_per_s": {
+      "median": 73406.0,
+      "min": 47961.22,
+      "max": 75007.11
+    },
+    "staging_rows_per_s": {
+      "median": 41658.98,
+      "min": 36506.03,
+      "max": 57086.35
+    },
+    "initial_steps": {
+      "verify_manifest": {
+        "median": 1.3,
+        "min": 0.71,
+        "max": 2.25
+      },
+      "validate_source": {
+        "median": 0.12,
+        "min": 0.05,
+        "max": 0.15
+      },
+      "ingest_raw": {
+        "median": 21.13,
+        "min": 20.68,
+        "max": 32.34
+      },
+      "load_staging": {
+        "median": 37.23,
+        "min": 27.17,
+        "max": 42.48
+      },
+      "dbt_build": {
+        "median": 25.09,
+        "min": 17.41,
+        "max": 26.86
+      },
+      "dbt_test": {
+        "median": 3.18,
+        "min": 3.14,
+        "max": 4.48
+      },
+      "quality_gate": {
+        "median": 0.03,
+        "min": 0.02,
+        "max": 0.03
+      },
+      "publish_marts": {
+        "median": 0.06,
+        "min": 0.06,
+        "max": 0.06
+      }
+    },
+    "rerun_steps": {
+      "verify_manifest": {
+        "median": 0.96,
+        "min": 0.69,
+        "max": 1.38
+      },
+      "validate_source": {
+        "median": 0.05,
+        "min": 0.04,
+        "max": 0.06
+      },
+      "ingest_raw": {
+        "median": 0.07,
+        "min": 0.07,
+        "max": 0.11
+      },
+      "load_staging": {
+        "median": 38.2,
+        "min": 27.91,
+        "max": 40.04
+      },
+      "dbt_build": {
+        "median": 28.55,
+        "min": 17.79,
+        "max": 37.09
+      },
+      "dbt_test": {
+        "median": 4.75,
+        "min": 3.45,
+        "max": 7.27
+      },
+      "quality_gate": {
+        "median": 0.03,
+        "min": 0.03,
+        "max": 0.05
+      },
+      "publish_marts": {
+        "median": 0.08,
+        "min": 0.07,
+        "max": 0.09
+      }
+    }
+  },
+  "database_size": {
+    "database": 769675747,
+    "meta": 1056768,
+    "dq_failures": 368640,
+    "src": 299393024,
+    "marts": 12369920,
+    "warehouse": 160047104,
+    "raw": 286482432
+  },
+  "query_latency": {
+    "Q1 monthly GMV & AOV (mart)": {
+      "median_ms": 0.22,
+      "p95_ms": 0.41,
+      "runs": 20
+    },
+    "Q2 monthly GMV & AOV (from facts)": {
+      "median_ms": 15.52,
+      "p95_ms": 15.95,
+      "runs": 20
+    },
+    "Q3 late-delivery rate by state, 2018": {
+      "median_ms": 0.29,
+      "p95_ms": 0.4,
+      "runs": 20
+    },
+    "Q4 top-10 categories by revenue": {
+      "median_ms": 0.17,
+      "p95_ms": 0.24,
+      "runs": 20
+    },
+    "Q5 one seller's monthly revenue (facts)": {
+      "median_ms": 0.61,
+      "p95_ms": 0.79,
+      "runs": 20
+    },
+    "Q6 one customer's order history (facts)": {
+      "median_ms": 0.18,
+      "p95_ms": 0.25,
+      "runs": 20
+    }
+  },
+  "deterministic": true,
+  "published_fingerprints": {
+    "marts.mart_category_performance": "112f50dff4056c985af22876e3c54d28",
+    "marts.mart_customer_behavior": "acb38aedca0a0ade5813c00c991f656f",
+    "marts.mart_delivery_performance": "aa8e91ffda877a82e2634a63a5000e85",
+    "marts.mart_payment_methods": "ba8073c17e6814de458e62a81f46b8ca",
+    "marts.mart_review_distribution": "a203685a79907c6739595bdd2095d77a",
+    "marts.mart_sales": "546f8c9cd029e72ad6ca379eb0ea46e0",
+    "marts.mart_seller_performance": "824a7608519fca338911555fb0b1a939",
+    "warehouse.dim_customer": "ae364b1ccda0d08a35988e95edbc43c6",
+    "warehouse.dim_date": "e739709ae8da9d0be5bfc8d31ef4d840",
+    "warehouse.dim_geography": "b9441272663622ad7e6a3bbf5a241671",
+    "warehouse.dim_product": "24202d3cad5ba04d6c621cac601a362b",
+    "warehouse.dim_seller": "5d96a5249d83becf41c22ca8ee46a547",
+    "warehouse.fct_order_items": "174b9e9b881404a4f40d7554cdddd1f6",
+    "warehouse.fct_orders": "95060629223c6f3008dbb688511d0484",
+    "warehouse.fct_payments": "a1669f4a2093b6a0a194e4977ac5becb",
+    "warehouse.fct_reviews": "733566f044b71e58e83b64382798ead7"
+  }
+}
