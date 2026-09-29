@@ -63,6 +63,25 @@ def tracked_run(
     log.info("pipeline_run_finished", status="success", duration_ms=tracker.elapsed_ms)
 
 
+# The flow's hard timeout is 2 h; a run still 'running' after this was killed (SIGKILL, host
+# crash) and never reached its failure handler.
+ABANDONED_AFTER = "3 hours"
+
+
+def _close_abandoned_runs(conn: Connection) -> None:
+    closed = conn.execute(
+        text(
+            "UPDATE meta.pipeline_runs SET status = 'failed', finished_at = now(), "
+            "failed_task = coalesce(failed_task, 'unknown'), error_type = 'abandoned', "
+            "error_message = 'still running after ' || :after || ': process presumably killed' "
+            "WHERE status = 'running' AND started_at < now() - CAST(:after AS interval)"
+        ),
+        {"after": ABANDONED_AFTER},
+    ).rowcount
+    if closed:
+        log.warning("abandoned_runs_closed", count=closed, after=ABANDONED_AFTER)
+
+
 def start_run(
     engine: Engine,
     flow_name: str,
@@ -72,6 +91,7 @@ def start_run(
 ) -> uuid.UUID:
     run_id = run_id or uuid.uuid4()
     with engine.begin() as conn:
+        _close_abandoned_runs(conn)
         conn.execute(
             text(
                 "INSERT INTO meta.pipeline_runs "

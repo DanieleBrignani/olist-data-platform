@@ -9,8 +9,10 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import Engine
+from sqlalchemy import Engine, text
 
+from olist_platform.config import Role
+from olist_platform.database.engine import get_engine
 from olist_platform.database.publish import publish
 from olist_platform.ingestion.runs import tracked_run
 from olist_platform.quality.gate import (
@@ -32,8 +34,21 @@ class WarehouseSummary:
     published_rows: dict[str, int] | None
 
 
+BUILD_SCHEMAS = ("warehouse_build", "marts_build")
+
+
+def reset_build_schemas(engine: Engine) -> None:
+    """Start every build from empty build schemas. dbt only (re)creates CURRENT models, so a
+    table left by a failed gate, a --no-publish run or a since-removed model would otherwise
+    survive in *_build and be swapped into the published schemas."""
+    with engine.begin() as conn:
+        for schema in BUILD_SCHEMAS:
+            conn.execute(text(f"DROP SCHEMA IF EXISTS {schema} CASCADE"))
+
+
 def dbt_build(target_path: str | None = None) -> DbtRun:
-    """Build every model (views + tables into *_build schemas). Model errors are fatal."""
+    """Build every model (views + tables into fresh *_build schemas). Model errors are fatal."""
+    reset_build_schemas(get_engine(Role.PIPELINE))
     return run_dbt(["run"], target_path=target_path)
 
 
