@@ -79,7 +79,11 @@ def test_flow_runs_all_steps_and_publishes(tmp_path: Path) -> None:
     )
     assert run == [("success", "olist_refresh", None)]
     assert q("SELECT sum(orders) FROM marts.mart_sales", Role.REPORTING) == [(3,)]
-    assert set(task_events(summary["pipeline_run_id"])) == {"ingest_raw", "load_staging"}
+    assert set(task_events(summary["pipeline_run_id"])) == {
+        "ingest_raw",
+        "detect_changes",
+        "load_staging",
+    }
 
 
 def test_gate_failure_stops_flow_at_quality_gate_and_keeps_published_data(
@@ -125,9 +129,12 @@ def test_idempotency_running_the_flow_twice_gives_identical_published_data(
 
     first = olist_refresh(data_root=root, lock_path=lock)
     after_first = published()
-    second = olist_refresh(data_root=root, lock_path=lock)
+    # full_refresh: really rebuild and republish from identical inputs (a plain rerun would
+    # be skipped as unchanged; that path is covered in test_incremental.py)
+    second = olist_refresh(data_root=root, lock_path=lock, full_refresh=True)
     after_second = published()
 
+    assert second["changes"]["rebuild"] is True
     assert diff(after_first, after_second) == []  # every table: same rows, same content
     assert len(after_first) == 16
     assert (first["ingest"]["loaded"], second["ingest"]["loaded"]) == (9, 0)
