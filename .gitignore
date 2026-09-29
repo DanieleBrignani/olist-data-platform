@@ -38,3 +38,6 @@ Thumbs.db
 .coverage
 coverage.xml
 reports/
+
+# Local database backups (make backup)
+backups/
