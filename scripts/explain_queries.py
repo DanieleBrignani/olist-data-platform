@@ -1,10 +1,14 @@
-"""EXPLAIN ANALYZE representative queries on src, with and without the index under test.
+"""EXPLAIN ANALYZE representative queries on src and on the published warehouse, with and
+without the index under test.
 
 For each query: warm-up run, then N measured runs WITH the index, then the same inside a
 transaction that drops the index and is ROLLED BACK (the database is never modified).
 Writes docs/query_plans.md. Every number in that file comes from this script.
 
-Usage (after `olist ingest` + `olist stage`):
+Warehouse indexes are declared in dbt/models/marts/core/_core.yml; dbt names them by hash,
+so they are addressed here as `schema.table(column)` and resolved through pg_indexes.
+
+Usage (after a published run, e.g. `make pipeline`):
     docker compose run --rm dev python scripts/explain_queries.py [--runs 5]
 """
 
@@ -30,8 +34,25 @@ OUT = Path(__file__).resolve().parents[1] / "docs" / "query_plans.md"
 class Query:
     key: str
     question: str
-    index: str | None
+    index: str
     sql: str
+    role: Role = Role.ADMIN  # must own the table to DROP INDEX (rolled back)
+
+
+def resolve_index(conn: Connection, spec: str) -> str:
+    """`schema.table(column)` -> qualified name of the single-column index on it."""
+    if "(" not in spec:
+        return spec
+    relation, column = spec.rstrip(")").split("(")
+    schema, table = relation.split(".")
+    name = conn.execute(
+        text(
+            "SELECT indexname FROM pg_indexes WHERE schemaname = :s AND tablename = :t "
+            "AND indexdef LIKE '%(' || :c || ')'"
+        ),
+        {"s": schema, "t": table, "c": column},
+    ).scalar_one()
+    return f'{schema}."{name}"'
 
 
 def pick_parameters(conn: Connection) -> dict[str, Any]:
@@ -49,6 +70,30 @@ def pick_parameters(conn: Connection) -> dict[str, Any]:
         )
     ).scalar_one()
     return {"seller_id": seller, "order_id": order}
+
+
+def pick_warehouse_parameters(conn: Connection) -> dict[str, Any]:
+    def one(sql: str) -> Any:
+        return conn.execute(text(sql)).scalar_one()
+
+    return {
+        "w_seller_id": one(
+            "SELECT seller_id FROM warehouse.fct_order_items GROUP BY seller_id "
+            "ORDER BY count(*) DESC, seller_id LIMIT 1 OFFSET 49"
+        ),
+        "w_product_id": one(
+            "SELECT product_id FROM warehouse.fct_order_items GROUP BY product_id "
+            "ORDER BY count(*) DESC, product_id LIMIT 1 OFFSET 49"
+        ),
+        "w_customer": one(
+            "SELECT customer_unique_id FROM warehouse.fct_orders GROUP BY 1 "
+            "ORDER BY count(*) DESC, 1 LIMIT 1"
+        ),
+        "w_order_id": one(
+            "SELECT order_id FROM warehouse.fct_reviews GROUP BY order_id "
+            "ORDER BY count(*) DESC, order_id LIMIT 1"
+        ),
+    }
 
 
 def queries(p: dict[str, Any]) -> list[Query]:
@@ -87,6 +132,50 @@ GROUP BY 1 ORDER BY 1""",
             "src.ix_src_order_reviews_order_id",
             f"""SELECT review_id, review_score, review_answer_timestamp
 FROM src.order_reviews WHERE order_id = '{p["order_id"]}'""",
+        ),
+        # ---- published warehouse: what the reporting role actually queries
+        Query(
+            "W1 seller sales history",
+            "Monthly revenue of one seller from the fact (50th largest by items sold)",
+            "warehouse.fct_order_items(seller_id)",
+            f"""SELECT d.year_month, sum(f.price) AS revenue, count(*) AS items
+FROM warehouse.fct_order_items f JOIN warehouse.dim_date d ON d.date_key = f.purchase_date_key
+WHERE f.seller_id = '{p["w_seller_id"]}'
+GROUP BY 1 ORDER BY 1""",
+            Role.PIPELINE,
+        ),
+        Query(
+            "W2 product sales history",
+            "All sales of one product (50th best-selling)",
+            "warehouse.fct_order_items(product_id)",
+            f"""SELECT count(*) AS items, sum(price) AS revenue, avg(freight_value) AS avg_freight
+FROM warehouse.fct_order_items WHERE product_id = '{p["w_product_id"]}'""",
+            Role.PIPELINE,
+        ),
+        Query(
+            "W3 customer order history",
+            "Every order of one person (the person with the most orders)",
+            "warehouse.fct_orders(customer_unique_id)",
+            f"""SELECT order_id, purchase_date_key, order_value, is_late
+FROM warehouse.fct_orders WHERE customer_unique_id = '{p["w_customer"]}'
+ORDER BY purchase_date_key""",
+            Role.PIPELINE,
+        ),
+        Query(
+            "W4 one week of orders",
+            "Orders and late share for one purchase week, filtered on the date key",
+            "warehouse.fct_orders(purchase_date_key)",
+            """SELECT count(*) AS orders, avg(is_late::int) AS late_share
+FROM warehouse.fct_orders WHERE purchase_date_key BETWEEN 20180301 AND 20180307""",
+            Role.PIPELINE,
+        ),
+        Query(
+            "W5 reviews of one order",
+            "All reviews attached to one order",
+            "warehouse.fct_reviews(order_id)",
+            f"""SELECT review_id, review_score
+FROM warehouse.fct_reviews WHERE order_id = '{p["w_order_id"]}'""",
+            Role.PIPELINE,
         ),
     ]
 
@@ -141,14 +230,24 @@ def main() -> None:
             for t in ("orders", "order_items", "order_reviews")
         }
         params = pick_parameters(conn)
+    with get_engine(Role.PIPELINE).connect() as conn:
+        params |= pick_warehouse_parameters(conn)
+        index_sizes = {
+            q.index: conn.execute(
+                text("SELECT pg_relation_size(CAST(:i AS regclass))"),
+                {"i": resolve_index(conn, q.index)},
+            ).scalar_one()
+            for q in queries(params)
+            if q.index.startswith("warehouse.")
+        }
 
     results = []
     for q in queries(params):
-        with engine.connect() as conn:
+        with get_engine(q.role).connect() as conn:
             with_index = measure(conn, q.sql, args.runs)
             conn.rollback()
             trans = conn.begin()
-            conn.execute(text(f"DROP INDEX {q.index}"))
+            conn.execute(text(f"DROP INDEX {resolve_index(conn, q.index)}"))
             without_index = measure(conn, q.sql, args.runs)
             trans.rollback()  # index restored; nothing persisted
         results.append((q, with_index, without_index))
@@ -179,6 +278,12 @@ def main() -> None:
             f"{wo['median_ms'] / w['median_ms']:.1f}x | {'; '.join(w['access'])} | "
             f"{'; '.join(wo['access'])} |"
         )
+    lines += [
+        "",
+        "Warehouse index sizes (built on every rebuild, then swapped in with the tables): "
+        + ", ".join(f"`{i}` {n / 1024:,.0f} kB" for i, n in index_sizes.items())
+        + ".",
+    ]
     for q, w, wo in results:
         lines += [
             "",

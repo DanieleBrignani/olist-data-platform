@@ -69,8 +69,34 @@ for the numbers.
 | `ix_src_order_items_seller_id` | one seller's items (seller performance drill-down) | keep: the plan switches from a full scan of `order_items` to a bitmap index scan |
 | `ix_src_orders_purchase_ts` | a narrow purchase-date window | keep: a bitmap index scan replaces the full scan |
 | `ix_src_order_reviews_order_id` | reviews of one order (FK lookup) | keep: the largest measured gain; without it every lookup is a full scan |
-| `ix_src_orders_purchase_ts` for **full-history aggregation** (Q3) | monthly revenue over all orders | **the index does not help**: the planner correctly scans every row either way. The bottleneck is the hash join plus a sort for `GROUP BY` that spills to disk under the default `work_mem`. The remedy is pre-aggregation in the marts (Phase 6), not another index |
-| `ix_src_order_items_product_id`, `ix_src_geolocation_zip` | FK / existence-check joins | kept for join paths. **Not individually re-measured on the warehouse**: the only warehouse index with a measured query is `fct_order_items(seller_id)` (benchmark Q5, sub-millisecond) |
+| `ix_src_orders_purchase_ts` for **full-history aggregation** (Q3) | monthly revenue over all orders | **the index does not help**: the planner correctly scans every row either way. The bottleneck is the hash join plus a sort for `GROUP BY` that spills to disk under the default `work_mem`. The remedy is pre-aggregation in the marts, not another index |
+| `ix_src_order_items_product_id`, `ix_src_geolocation_zip` | FK / existence-check joins during staging | kept for join paths; not individually measured |
+
+### Warehouse (fact) indexes: evaluation
+
+These five secondary indexes (`dbt/models/marts/core/_core.yml`) serve the published layer
+that the reporting role queries. Until this review only `fct_order_items(seller_id)` had been
+measured, so each one was checked for removal against a realistic lookup (W1-W5 in
+[query_plans.md](query_plans.md)). Method: EXPLAIN ANALYZE, median of 7 warm runs, with the
+index versus dropped inside a rolled-back transaction, on the real published data.
+
+| Index | Lookup | With | Without | Size | Verdict |
+|-------|--------|-----:|--------:|-----:|---------|
+| `fct_order_items(seller_id)` | one seller's sales | 0.83 ms | 8.85 ms | 984 kB | keep |
+| `fct_order_items(product_id)` | one product's sales | 0.14 ms | 8.27 ms | 2.6 MB | keep |
+| `fct_orders(customer_unique_id)` | one person's orders | 0.04 ms | 8.41 ms | 5.6 MB | keep |
+| `fct_orders(purchase_date_key)` | one week of orders | 1.57 ms | 11.82 ms | 704 kB | keep |
+| `fct_reviews(order_id)` | reviews of one order (not covered: the PK starts with `review_id`) | 0.03 ms | 10.38 ms | 5.7 MB | keep |
+
+**Cost:** building all five takes 0.9-3.1 s per rebuild (3 runs of `CREATE INDEX` in a
+rolled-back transaction: 3.1 s cold, 1.0 s and 0.9 s warm), against a dbt build of about
+25 s, plus about 15.6 MB of storage.
+**BEFORE → AFTER:** no change. Every index replaces a sequential scan with an index or
+bitmap scan, at 7× to 400× lower latency on its lookup, for a rebuild cost of a few percent.
+**WHY no index was removed:** none failed the test. The only measured useless case
+(full-history aggregation, Q3) is already answered by the marts. The absolute gains are
+milliseconds because the tables hold about 100 k rows; they matter under concurrent
+dashboard or drill-down traffic, and they grow linearly with table size.
 
 Indexes that were deliberately **not** created:
 * **Low-cardinality columns** (`order_status`, `payment_type`, UF codes): a filter on them
