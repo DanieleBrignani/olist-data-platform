@@ -90,6 +90,8 @@ restore: ## restore a backup in one transaction: make restore FILE=backups/<file
 verify-backup: ## prove backup+restore round-trip: identical content afterwards (DB=olist_dw)
 	@scripts/verify_backup_restore.sh $(or $(DB),olist_dw)
 
+# own host port, so it can run next to the main stack
+benchmark: export POSTGRES_HOST_PORT := 55442
 benchmark: ## reproducible benchmark in an isolated compose project (fresh database)
 	$(COMPOSE) -p olistbench up -d --wait postgres
 	$(COMPOSE) -p olistbench up --exit-code-from migrate migrate

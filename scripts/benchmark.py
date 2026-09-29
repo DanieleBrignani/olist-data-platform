@@ -15,8 +15,10 @@ Writes docs/benchmark.md, benchmark/results.json and (with --update-readme) the 
 "Measured Results" block of README.md.
 
 DESTRUCTIVE: it empties meta/raw/src and drops the dbt schemas of the target database, so it
-refuses to run without --reset. Run it in an isolated compose project (fresh volume):
+refuses to run without --reset. Run it in an isolated compose project (fresh volume, own host
+port so it can run next to the main stack), or simply `make benchmark`:
 
+    export POSTGRES_HOST_PORT=55442
     docker compose -p olistbench up -d --wait postgres
     docker compose -p olistbench up --exit-code-from migrate migrate
     docker compose -p olistbench run --rm dev python scripts/benchmark.py --reset --update-readme
