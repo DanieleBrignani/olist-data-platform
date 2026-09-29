@@ -1,5 +1,7 @@
 """REAL DATA, end to end: the 9 Olist v2 files -> published warehouse and marts, via the real
 Prefect flow, run THREE times (initial load, plain rerun, forced reload of every file).
+The plain rerun is detected as unchanged and skips the rebuild; the forced reload rebuilds
+and republishes everything from scratch.
 
 Proves on the real dataset that:
   * raw files -> final marts works end to end, with every locked record accounted for;
@@ -93,6 +95,7 @@ def test_every_run_publishes_byte_identical_tables(runs: list[dict]) -> None:
 
 def test_reruns_skip_or_replace_but_never_duplicate(runs: list[dict]) -> None:
     assert runs[1]["ingest"] == {"loaded": 0, "skipped": 9, "rows_loaded": 0, "rows_rejected": 0}
+    assert [r["changes"]["rebuild"] for r in runs] == [True, False, True]
     assert runs[2]["ingest"]["loaded"] == 9  # forced: every file re-copied...
     for contract in load_contracts().values():  # ...yet raw holds exactly one copy
         expected = LOCK.entry(contract.file).row_count
