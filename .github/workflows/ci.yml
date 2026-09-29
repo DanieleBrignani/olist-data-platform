@@ -71,10 +71,9 @@ jobs:
       - name: dbt compile
         run: docker compose run --rm dev dbt compile --target-path /tmp/dbt-ci
       - name: pytest (unit + integration + e2e on synthetic data; dbt tests run inside)
-        run: >
-          docker compose run --rm dev pytest -m "not source_data"
-          --cov=olist_platform --cov=orchestration --cov-report=term --cov-report=xml
-          --junitxml=reports/junit.xml
+        run: make test-ci
+      - name: "Recovery check: backup/restore round-trip on the test database"
+        run: make verify-backup DB=olist_dw_test
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v7

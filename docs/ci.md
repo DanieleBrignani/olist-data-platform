@@ -6,13 +6,26 @@ Workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml). It runs on 
 | Job | Checks | Fails when |
 |-----|--------|------------|
 | **lint** (no DB) | ruff lint, ruff format check (locked versions via `uv sync --frozen`), `promtool check config` on the Prometheus config and alert rules, `actionlint` on the workflow itself | any lint/format finding, invalid PromQL or rule, invalid workflow |
-| **test** | build images; start Postgres; apply migrations; **schema checks**: migrations upgrade → downgrade to base → upgrade on a fresh database, `olist contracts validate`; **dbt compile**; **pytest** (unit + integration + e2e on synthetic data, 225 tests, with coverage + JUnit report). The **dbt tests** run inside those integration tests against the real dbt project | any failing test, migration that cannot be reversed, invalid contract, dbt compile error |
+| **test** | build images; start Postgres; apply migrations; **schema checks**: migrations upgrade → downgrade to base → upgrade on a fresh database, `olist contracts validate`; **dbt compile**; **pytest** via `make test-ci` (unit + integration + e2e on synthetic data, with coverage + JUnit report); the **dbt tests** run inside those integration tests against the real dbt project; **backup/restore round-trip** (`make verify-backup DB=olist_dw_test`) | any failing test, migration that cannot be reversed, invalid contract, dbt compile error, a restore that does not reproduce the database |
 | **real-data** (after test) | restores the Olist v2 files from cache (key = hash of the committed checksum lock) or downloads them; verifies them against the lock; runs `ingest → stage → warehouse` on the full dataset, which includes **dbt test + quality gate**; then the real-data e2e and idempotency tests (3 full pipeline runs) | checksum mismatch, breaking schema change, **any CRITICAL data-quality failure** (the gate exits 1), non-identical reruns |
 | **images** | builds the runtime, dev and Grafana images | a Dockerfile no longer builds |
 
 **A critical failure fails the pipeline.** A CRITICAL data-quality result makes
 `olist warehouse` exit 1, which fails the `real-data` job, and therefore the workflow.
 Deterministic failures are never retried; they are surfaced.
+
+## Verification status
+
+| Level | What it means | Status |
+|-------|---------------|--------|
+| Locally validated | the same commands, run on the Windows development host (Docker Desktop) | all jobs' commands pass |
+| Simulated CI | the `test` job run on a clean export of the committed files, in a separate compose project with a fresh database, as a non-default uid, with GNU make inside a Linux container (`docker:28-cli`); `actionlint` passes | passes |
+| **GitHub Actions** | the workflow run on GitHub-hosted `ubuntu-24.04` runners | **not yet run**: the repository has not been pushed. No "CI passing" claim is made anywhere |
+
+Things that can only fail on GitHub: action major versions resolving differently, runner disk
+or memory limits during the real-data job (about 1.5 M rows plus dbt, 734 MB database), and
+the anonymous Kaggle download if Kaggle starts requiring authentication (after the first
+successful run, the `actions/cache` entry keyed by the checksum lock removes that dependency).
 
 ## Secrets
 
