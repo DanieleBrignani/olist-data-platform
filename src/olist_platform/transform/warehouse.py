@@ -1,6 +1,6 @@
 """dbt_build -> dbt_test -> quality_gate -> publish_marts.
 
-Each step is a plain function (the Prefect flow wraps them as tasks in Phase 8);
+Each step is a plain function (the Prefect flow wraps them as tasks);
 `run_warehouse` chains them under one tracked pipeline run for CLI use.
 """
 

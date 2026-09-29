@@ -1,8 +1,8 @@
 """Ingestion entrypoint: verify_manifest -> validate_source -> ingest_raw.
 
-Each step is a plain function so the Prefect flow (Phase 8) can wrap them as tasks with
-their own retry policies; `run_ingestion` chains them for CLI use with the same run
-bookkeeping (meta.pipeline_runs) the flow will use.
+Each step is a plain function so the Prefect flow can wrap them as tasks with their own
+retry policies; `run_ingestion` chains them for CLI use with the same run bookkeeping
+(meta.pipeline_runs) the flow uses.
 """
 
 from __future__ import annotations

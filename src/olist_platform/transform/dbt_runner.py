@@ -1,6 +1,6 @@
 """Programmatic dbt invocation (dbtRunner) with structured results.
 
-Used by the CLI (`olist transform`) and, in Phase 8, by the orchestrated flow. dbt connects
+Used by the CLI (`olist transform`) and by the orchestrated flow. dbt connects
 as olist_pipeline using dbt/profiles.yml (credentials from the environment only).
 """
 

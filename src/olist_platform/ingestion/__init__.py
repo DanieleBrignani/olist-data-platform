@@ -1,1 +1,1 @@
-"""Implemented in a later phase (see README roadmap)."""
+"""Source acquisition, checksum manifest, raw ingestion and pipeline-run bookkeeping."""

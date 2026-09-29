@@ -1,1 +1,1 @@
-"""Implemented in a later phase (see README roadmap)."""
+"""Data contracts: loading, source-header validation and generated contract docs."""

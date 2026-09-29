@@ -73,7 +73,7 @@ def on_task_failure(task: Any, task_run: Any, state: Any) -> None:
 
 
 def on_flow_failure(flow: Any, flow_run: Any, state: Any) -> None:
-    """Flow-level failure/crash callback (the Phase 9 metrics also count these runs)."""
+    """Flow-level failure/crash callback (the exported run metrics also count these runs)."""
     log.error(
         "flow_failed",
         flow=getattr(flow, "name", "?"),

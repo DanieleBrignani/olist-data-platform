@@ -10,4 +10,3 @@ logs/
 .ruff_cache/
 dbt/target/
 dbt/logs/
-notebooks/
