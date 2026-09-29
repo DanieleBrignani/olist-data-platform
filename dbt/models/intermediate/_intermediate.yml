@@ -1,0 +1,96 @@
+version: 2
+
+# Intermediate = reusable business logic (aggregation to a new grain, joins, derived
+# measures), materialised as views and consumed only by the core models. Each model changes
+# the grain of its inputs, so each one tests its grain key: a fan-out bug in a join here
+# would otherwise surface only as inflated numbers in the marts. Tests inherit the project
+# default severity (CRITICAL: blocks publication).
+
+models:
+  - name: int_order_delivery
+    description: "Delivery timeline per order (grain: order_id). Durations in days; NULL when a milestone is missing."
+    columns:
+      - name: order_id
+        data_tests: [unique, not_null]
+      - {name: purchase_to_approval_days, description: Purchase → payment approval.}
+      - {name: purchase_to_carrier_days, description: Purchase → hand-over to carrier.}
+      - {name: delivery_lead_days, description: Purchase → delivery to customer.}
+      - {name: estimated_lead_days, description: Purchase date → promised date.}
+      - {name: is_delivered, description: "status = delivered and a delivery timestamp exists."}
+      - {name: days_vs_estimate, description: "Delivery date − promised date (negative = early)."}
+      - {name: is_late, description: "Delivered after the promised date + var late_delivery_grace_days (0). NULL if not delivered."}
+
+  - name: int_order_payments
+    description: "Payments rolled up per order (grain: order_id; only orders with a payment record)."
+    columns:
+      - name: order_id
+        data_tests: [unique, not_null]
+      - {name: payment_value, description: Sum over all instruments.}
+      - {name: payment_count, description: Number of payment records.}
+      - {name: max_installments, description: Largest installment count used.}
+      - {name: primary_payment_type, description: Instrument that paid the largest amount (ties → lowest sequence).}
+      - {name: used_voucher, description: At least one voucher payment.}
+
+  - name: int_order_reviews
+    description: "Reviews rolled up per order (grain: order_id; only reviewed orders; an order can have several reviews)."
+    columns:
+      - name: order_id
+        data_tests: [unique, not_null]
+      - {name: review_count, description: Reviews attached to the order.}
+      - {name: avg_review_score, description: Mean score, 2 decimals.}
+      - {name: min_review_score, description: Worst score.}
+
+  - name: int_order_enriched
+    description: >
+      One row per order (grain: order_id) joining customer, item totals, payments, reviews
+      and delivery timeline. The base of fct_orders and of every order-level mart.
+      order_value = items + freight; payment_value is kept separately so the two can be
+      reconciled (assert_payments_cover_order_value).
+    columns:
+      - name: order_id
+        data_tests: [unique, not_null]
+      - {name: customer_unique_id, description: The person (from stg_customers).}
+      - {name: order_value, description: Item prices + freight in BRL (0 for orders without items).}
+      - {name: payment_value, description: Sum of payments in BRL (0 when there is no payment record).}
+      - {name: is_late, description: From int_order_delivery.}
+      - {name: avg_review_score, description: From int_order_reviews; NULL when not reviewed.}
+
+  - name: int_order_items_enriched
+    description: "Item lines with category (English, else Portuguese, else 'uncategorized') and order timestamps (grain: order_id, order_item_id)."
+    data_tests:
+      - unique_combination_of_columns: {arguments: {columns: [order_id, order_item_id]}}
+    columns:
+      - {name: item_total, description: price + freight_value.}
+      - {name: category_name, description: English category, falling back to Portuguese, then 'uncategorized'.}
+      - {name: shipped_after_limit, description: The order reached the carrier after this item's shipping deadline.}
+
+  - name: int_customer_orders
+    description: >
+      One row per person (grain: customer_unique_id). Olist issues a new customer_id per
+      order, so the person level only exists after grouping. Address = that of the most
+      recent order (SCD type 1: the snapshot has no address history).
+    columns:
+      - name: customer_unique_id
+        data_tests: [unique, not_null]
+      - {name: order_count, description: All orders, including canceled.}
+      - {name: valid_order_count, description: Non-canceled orders.}
+      - {name: lifetime_value, description: Sum of order_value over non-canceled orders.}
+
+  - name: int_seller_performance
+    description: "One row per seller with at least one item sold (grain: seller_id)."
+    columns:
+      - name: seller_id
+        data_tests: [unique, not_null]
+      - {name: order_count, description: Orders the seller took part in.}
+      - {name: revenue, description: Sum of the seller's item prices (freight excluded).}
+      - {name: late_orders, description: Orders delivered late to the customer.}
+      - {name: orders_shipped_after_limit, description: Orders the seller handed to the carrier after the deadline.}
+
+  - name: int_geography
+    description: >
+      One row per zip prefix seen anywhere (geolocation, customers, sellers; grain:
+      zip_code_prefix). Representative city/state = most frequent across sources; centroid
+      of in-Brazil points only; has_coordinates = false when there are none.
+    columns:
+      - name: zip_code_prefix
+        data_tests: [unique, not_null]

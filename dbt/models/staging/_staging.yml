@@ -1,0 +1,105 @@
+version: 2
+
+# Staging = 1:1 views over the typed `src` tables: renaming, city normalisation and a few
+# derived flags; no joins, no filtering. Grain and keys are those of the source table.
+# Keys are NOT re-tested here: `src` already enforces them as PostgreSQL PRIMARY KEY /
+# FOREIGN KEY constraints (migration 0003), so a dbt test could never fail and would
+# only add a scan of every table to each run. Tests start where dbt adds logic
+# (intermediate, core, marts).
+
+models:
+  - name: stg_orders
+    description: "One row per order (grain: order_id). Purchase-to-delivery timestamps."
+    columns:
+      - {name: order_id, description: Order identifier (PK in src.orders).}
+      - {name: customer_id, description: Per-order customer identifier; one person can have many (see customer_unique_id).}
+      - {name: order_status, description: "Lifecycle status: delivered, shipped, canceled, unavailable, invoiced, processing, created, approved."}
+      - {name: purchased_at, description: Purchase timestamp (local time, no zone in the source).}
+      - {name: approved_at, description: Payment approval timestamp; NULL when never approved.}
+      - {name: delivered_to_carrier_at, description: Hand-over to the logistics partner.}
+      - {name: delivered_to_customer_at, description: Delivery to the customer; NULL when not delivered.}
+      - {name: estimated_delivery_date, description: Delivery date promised at purchase (a date in the source).}
+      - {name: is_canceled, description: "order_status in (canceled, unavailable)."}
+
+  - name: stg_order_items
+    description: "One row per item line (grain: order_id, order_item_id)."
+    columns:
+      - {name: order_id, description: FK to stg_orders.}
+      - {name: order_item_id, description: "Line number within the order (1..n)."}
+      - {name: product_id, description: FK to stg_products.}
+      - {name: seller_id, description: FK to stg_sellers.}
+      - {name: shipping_limit_at, description: Deadline for the seller to hand the item to the carrier.}
+      - {name: price, description: Item price in BRL.}
+      - {name: freight_value, description: Freight charged for the item in BRL.}
+
+  - name: stg_payments
+    description: "One row per payment instrument used on an order (grain: order_id, payment_sequential)."
+    columns:
+      - {name: order_id, description: FK to stg_orders.}
+      - {name: payment_sequential, description: Sequence of the payment within the order.}
+      - {name: payment_type, description: "credit_card, boleto, voucher, debit_card, not_defined."}
+      - {name: payment_installments, description: Number of installments.}
+      - {name: payment_value, description: Amount paid with this instrument in BRL.}
+
+  - name: stg_reviews
+    description: >
+      One row per (review_id, order_id). review_id alone is not unique in the source: the same
+      survey answer can be attached to several orders (docs/source_profile.md).
+    columns:
+      - {name: review_id, description: Survey identifier.}
+      - {name: order_id, description: FK to stg_orders.}
+      - {name: review_score, description: 1-5 stars.}
+      - {name: comment_title, description: Optional title (Portuguese free text).}
+      - {name: comment_message, description: Optional message (Portuguese free text).}
+      - {name: has_comment, description: Message is present and not blank.}
+      - {name: review_sent_at, description: When the survey was sent to the customer.}
+      - {name: review_answered_at, description: When the customer answered.}
+
+  - name: stg_customers
+    description: "One row per customer_id, i.e. per order address (grain: customer_id)."
+    columns:
+      - {name: customer_id, description: Per-order identifier (PK in src.customers).}
+      - {name: customer_unique_id, description: Identifier of the person across orders.}
+      - {name: zip_code_prefix, description: First 5 digits of the CEP.}
+      - {name: city, description: "Lower-case, accent-stripped, trimmed city name (macro normalize_city)."}
+      - {name: state, description: UF code.}
+
+  - name: stg_sellers
+    description: "One row per seller (grain: seller_id)."
+    columns:
+      - {name: seller_id, description: Seller identifier.}
+      - {name: zip_code_prefix, description: First 5 digits of the CEP.}
+      - {name: city, description: Normalised city name.}
+      - {name: state, description: UF code.}
+
+  - name: stg_products
+    description: "One row per product (grain: product_id). Catalogue attributes; category in Portuguese."
+    columns:
+      - {name: product_id, description: Product identifier.}
+      - {name: category_name_pt, description: Portuguese category; NULL for 610 products without one.}
+      - {name: name_length, description: Characters in the product name.}
+      - {name: description_length, description: Characters in the description.}
+      - {name: photos_qty, description: Number of published photos.}
+      - {name: weight_g, description: Weight in grams.}
+      - {name: length_cm, description: Package length.}
+      - {name: height_cm, description: Package height.}
+      - {name: width_cm, description: Package width.}
+
+  - name: stg_geolocation
+    description: >
+      One row per distinct geolocation point (exact duplicates were collapsed in `src`, with
+      their count kept in source_record_count). Many points per zip prefix.
+    columns:
+      - {name: zip_code_prefix, description: First 5 digits of the CEP.}
+      - {name: lat, description: Latitude.}
+      - {name: lng, description: Longitude.}
+      - {name: city, description: Normalised city name.}
+      - {name: state, description: UF code.}
+      - {name: source_record_count, description: How many identical rows the source file had for this point.}
+      - {name: is_within_brazil, description: Inside Brazil's bounding box (same box as the WARNING contract rule).}
+
+  - name: stg_category_translation
+    description: "Portuguese → English category names (grain: category_name_pt)."
+    columns:
+      - {name: category_name_pt, description: Portuguese category name.}
+      - {name: category_name_en, description: English category name.}

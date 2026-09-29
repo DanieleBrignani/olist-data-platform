@@ -1,5 +1,11 @@
 version: 2
 
+# No `freshness:` block, deliberately. dbt source freshness compares a loaded_at column to
+# now(); Olist is a static 2016-2018 extract, so every freshness check would fail forever and
+# teach people to ignore it. What is monitored instead: time since the last successful
+# publication (Prometheus `dataset_freshness_seconds`, alert OlistDatasetStale), with the
+# business-event horizon exposed separately (docs/observability.md).
+
 sources:
   - name: src
     description: >
