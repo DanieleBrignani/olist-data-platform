@@ -1,9 +1,11 @@
 """Reproducible benchmark on the REAL Olist v2 dataset. Every number it prints is measured.
 
-Measures, for each repetition (empty database -> initial load -> rerun):
+Measures, for each repetition (empty database -> initial load -> rerun -> forced rebuild):
   * initial load runtime per step and end to end, rows/second for ingestion and staging,
     dbt build + test time;
-  * rerun runtime (unchanged files: checksum skip, rebuild, gate, publish);
+  * rerun runtime with unchanged inputs (checksum skip, change detection -> no rebuild);
+  * forced rebuild of the same inputs (`--full-refresh`: staging, dbt, gate, publish), i.e.
+    what every rerun cost before change detection;
   * database size by schema after the load;
 and once afterwards:
   * representative reporting-query latency (median / p95 over N warm runs, reporting role);
@@ -38,6 +40,7 @@ from typing import Any
 from sqlalchemy import text
 
 from olist_platform.config import Role, get_settings
+from olist_platform.database.change_detection import evaluate
 from olist_platform.database.engine import get_engine
 from olist_platform.database.fingerprint import fingerprint
 from olist_platform.database.publish import publish
@@ -136,7 +139,9 @@ def reset(pipeline_engine: Any, admin_engine: Any) -> None:
         conn.execute(text("VACUUM"))  # comparable starting point for every repetition
 
 
-def run_cycle(label: str, force_reload: bool, timer: Timer, dbt_target: str) -> dict[str, Any]:
+def run_cycle(
+    label: str, force_reload: bool, timer: Timer, dbt_target: str, full_refresh: bool = False
+) -> dict[str, Any]:
     engine = get_engine(Role.PIPELINE)
     lock, contracts = load_lock(LOCK_PATH), load_contracts()
     directory = raw_dir(ROOT / "data")
@@ -151,21 +156,28 @@ def run_cycle(label: str, force_reload: bool, timer: Timer, dbt_target: str) -> 
             files = ingest_raw(
                 engine, run.pipeline_run_id, directory, lock, checksums, contracts, force_reload
             )
-        with timer.step("load_staging"):
-            tables = load_staging(engine, run.pipeline_run_id, contracts)
-        with timer.step("dbt_build"):
-            dbt_build(dbt_target)
-        with timer.step("dbt_test"):
-            tests = dbt_test(dbt_target)
-        with timer.step("quality_gate"):
-            decision = quality_gate(engine, run.pipeline_run_id, tests)
-        with timer.step("publish_marts"):
-            publish(engine, run.pipeline_run_id)
+        with timer.step("detect_changes"), engine.connect() as conn:
+            changes = evaluate(conn, full_refresh or force_reload)
+        out["rebuild"] = changes.rebuild
+        if changes.rebuild:
+            with timer.step("load_staging"):
+                tables = load_staging(engine, run.pipeline_run_id, contracts)
+            with timer.step("dbt_build"):
+                dbt_build(dbt_target)
+            with timer.step("dbt_test"):
+                tests = dbt_test(dbt_target)
+            with timer.step("quality_gate"):
+                decision = quality_gate(engine, run.pipeline_run_id, tests)
+            with timer.step("publish_marts"):
+                publish(engine, run.pipeline_run_id, changes.fingerprint)
     out["total_s"] = round(time.perf_counter() - started, 3)
     out["steps_s"] = dict(timer.steps)
     out["rows_ingested"] = sum(f.rows_loaded for f in files)
     out["files_loaded"] = sum(f.status == "loaded" for f in files)
     out["files_skipped"] = sum(f.status == "skipped" for f in files)
+    if not changes.rebuild:
+        out["gate"] = f"skipped ({changes.reason})"
+        return out
     out["rows_staged_in"] = sum(t.raw_rows for t in tables)
     out["rows_staged_out"] = sum(t.src_rows for t in tables)
     out["quarantined"] = sum(t.quarantined for t in tables)
@@ -282,6 +294,7 @@ def render(results: dict[str, Any]) -> tuple[str, str]:
     reps = results["repetitions"]
     initial = [r["initial"] for r in reps]
     rerun = [r["rerun"] for r in reps]
+    forced = [r["forced"] for r in reps]
     agg = results["aggregate"]
     env = results["environment"]
     size = results["database_size"]
@@ -306,12 +319,14 @@ def render(results: dict[str, Any]) -> tuple[str, str]:
             f"| Data-quality tests evaluated / warnings / gate | {initial[0]['dq_tests']} / "
             f"{initial[0]['dq_warnings']} / {initial[0]['gate']} |",
             f"| Initial load, end to end (empty DB → published marts) | {s('initial_total_s')} |",
-            f"| Rerun with unchanged files (checksum skip + rebuild + gate + publish) | "
+            f"| Rerun with unchanged inputs (checksum skip, change detection: no rebuild) | "
             f"{s('rerun_total_s')} |",
+            f"| Forced rebuild of unchanged inputs (`--full-refresh`: staging, dbt, gate, "
+            f"publish) | {s('forced_total_s')} |",
             f"| Ingestion throughput | {agg['ingest_rows_per_s']['median']:,.0f} rows/s |",
             f"| Staging throughput (raw → typed, all rules) | "
             f"{agg['staging_rows_per_s']['median']:,.0f} rows/s |",
-            f"| dbt build (33 models) + dbt test (36 tests) | "
+            f"| dbt build (33 models) + dbt test ({initial[0]['dq_tests']} tests) | "
             f"{s('dbt_build_s')} + {s('dbt_test_s')} |",
             f"| Database size after load | {mb(size['database'])} |",
             "| Reporting query latency, median (p95) | "
@@ -320,7 +335,8 @@ def render(results: dict[str, Any]) -> tuple[str, str]:
                 for k, v in lat.items()
             )
             + " |",
-            f"| Published tables identical across all {n} repetitions (content md5) | "
+            f"| Published tables identical across all {n} repetitions and forced rebuilds "
+            f"(content md5) | "
             f"{'yes' if results['deterministic'] else 'NO'} |",
         ]
     )
@@ -342,8 +358,9 @@ def render(results: dict[str, Any]) -> tuple[str, str]:
         "## Method",
         "",
         f"* {n} repetitions. Each starts from an **empty** database (meta/raw/src truncated, "
-        "dbt schemas dropped, `VACUUM`), then runs the initial load, then a rerun with the same "
-        "files.",
+        "dbt schemas dropped, `VACUUM`), then runs the initial load, a rerun with the same "
+        "files (expected: skipped by change detection), and a forced rebuild of the same "
+        "inputs (`full_refresh`).",
         "* Steps are the same functions the Prefect flow calls, timed without orchestrator "
         "overhead.",
         "* Query latency: client-side wall time as `olist_reporting` on the published schemas, "
@@ -372,6 +389,15 @@ def render(results: dict[str, Any]) -> tuple[str, str]:
             for step, v in agg["rerun_steps"].items()
         ],
         "",
+        "## Forced rebuild by step (seconds, median / min / max)",
+        "",
+        "| Step | Median | Min | Max |",
+        "|------|-------:|----:|----:|",
+        *[
+            f"| {step} | {v['median']:.2f} | {v['min']:.2f} | {v['max']:.2f} |"
+            for step, v in agg["forced_steps"].items()
+        ],
+        "",
         "## Database size after load",
         "",
         "| Scope | Size |",
@@ -389,12 +415,14 @@ def render(results: dict[str, Any]) -> tuple[str, str]:
         "",
         "## Per repetition",
         "",
-        "| # | Initial total (s) | Rerun total (s) | Files loaded / skipped on rerun | Gate |",
-        "|---|------------------:|----------------:|---------------------------------|------|",
+        "| # | Initial (s) | Rerun (s) | Forced rebuild (s) | Files loaded / skipped on rerun "
+        "| Gate: initial / rerun / forced |",
+        "|---|---:|---:|---:|---|---|",
         *[
-            f"| {i + 1} | {a['total_s']:.1f} | {b['total_s']:.1f} | "
-            f"{a['files_loaded']} / {b['files_skipped']} | {a['gate']} |"
-            for i, (a, b) in enumerate(zip(initial, rerun, strict=True))
+            f"| {i + 1} | {a['total_s']:.1f} | {b['total_s']:.1f} | {c['total_s']:.1f} | "
+            f"{a['files_loaded']} / {b['files_skipped']} | {a['gate']} / {b['gate']} / "
+            f"{c['gate']} |"
+            for i, (a, b, c) in enumerate(zip(initial, rerun, forced, strict=True))
         ],
     ]
     return "\n".join(lines) + "\n", readme
@@ -433,15 +461,22 @@ def main() -> int:
         print(f"  initial load {initial['total_s']:.1f}s", flush=True)
         if i == 0:
             size = database_size()
+        with get_engine(Role.REPORTING).connect() as conn:
+            after_initial = {t: f.md5 for t, f in fingerprint(conn).items()}
         rerun = run_cycle("rerun", False, Timer(), dbt_target)
-        print(f"  rerun {rerun['total_s']:.1f}s", flush=True)
+        print(f"  rerun {rerun['total_s']:.1f}s (rebuild: {rerun['rebuild']})", flush=True)
+        forced = run_cycle("forced_rebuild", False, Timer(), dbt_target, full_refresh=True)
+        print(f"  forced rebuild {forced['total_s']:.1f}s", flush=True)
         with get_engine(Role.REPORTING).connect() as conn:
             fingerprints.append({t: f.md5 for t, f in fingerprint(conn).items()})
-        reps.append({"initial": initial, "rerun": rerun})
+        # a rebuild from identical inputs must publish identical tables
+        fingerprints.append(after_initial)
+        reps.append({"initial": initial, "rerun": rerun, "forced": forced})
 
     latency = query_latency(args.query_runs)
     initial = [r["initial"] for r in reps]
     rerun = [r["rerun"] for r in reps]
+    forced = [r["forced"] for r in reps]
 
     def per_step(runs: list[dict]) -> dict[str, dict[str, float]]:
         return {step: summarise([r["steps_s"][step] for r in runs]) for step in runs[0]["steps_s"]}
@@ -449,6 +484,7 @@ def main() -> int:
     aggregate: dict[str, Any] = {
         "initial_total_s": summarise([r["total_s"] for r in initial]),
         "rerun_total_s": summarise([r["total_s"] for r in rerun]),
+        "forced_total_s": summarise([r["total_s"] for r in forced]),
         "dbt_build_s": summarise([r["steps_s"]["dbt_build"] for r in initial]),
         "dbt_test_s": summarise([r["steps_s"]["dbt_test"] for r in initial]),
         "ingest_rows_per_s": summarise(
@@ -459,6 +495,7 @@ def main() -> int:
         ),
         "initial_steps": per_step(initial),
         "rerun_steps": per_step(rerun),
+        "forced_steps": per_step(forced),
     }
     results = {
         "environment": environment(),
@@ -481,7 +518,8 @@ def main() -> int:
         readme = readme[: start + len(README_START)] + "\n" + readme_block + "\n" + readme[end:]
         (ROOT / "README.md").write_text(readme, encoding="utf-8")
     print(readme_block)
-    return 0 if results["deterministic"] else 1
+    skipped = not any(r["rebuild"] for r in rerun)
+    return 0 if results["deterministic"] and skipped else 1
 
 
 if __name__ == "__main__":
