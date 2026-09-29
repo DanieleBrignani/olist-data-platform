@@ -293,12 +293,17 @@ def run_flow(
     data_root: Path = DEFAULT_DATA_ROOT,
     force_reload: bool = typer.Option(False, help="Reload files already loaded"),
     publish_enabled: bool = typer.Option(True, "--publish/--no-publish"),
+    full_refresh: bool = typer.Option(
+        False, "--full-refresh", help="Rebuild even when inputs are unchanged"
+    ),
 ) -> None:
     """Run the full olist_refresh flow once (against PREFECT_API_URL, or ephemeral)."""
     from orchestration.olist_flow import olist_refresh  # noqa: PLC0415 - heavy import
 
     try:
-        summary = olist_refresh(str(data_root), force_reload, publish_enabled)
+        summary = olist_refresh(
+            str(data_root), force_reload, publish_enabled, full_refresh=full_refresh
+        )
     except PlatformError as exc:
         get_logger("run").error("flow_failed", error_type=exc.error_type, error=str(exc)[:500])
         raise typer.Exit(code=1) from exc

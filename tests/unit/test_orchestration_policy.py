@@ -20,6 +20,7 @@ TASKS = {
     "verify_manifest": olist_flow.verify_manifest,
     "validate_source": olist_flow.validate_source,
     "ingest_raw": olist_flow.ingest_raw,
+    "detect_changes": olist_flow.detect_changes,
     "load_staging": olist_flow.load_staging,
     "dbt_build": olist_flow.dbt_build,
     "dbt_test": olist_flow.dbt_test,

@@ -20,6 +20,7 @@ from psycopg import errors as pg_errors
 from sqlalchemy import Connection, Engine, text
 from sqlalchemy.exc import DBAPIError
 
+from olist_platform.database.change_detection import current_fingerprint
 from olist_platform.errors import DeterministicError, QualityGateError, TransientError
 from olist_platform.utils.logging import get_logger
 
@@ -62,15 +63,26 @@ def _revoke_reporting(conn: Connection, schema: str) -> None:
     conn.execute(text(f"REVOKE ALL ON SCHEMA {schema} FROM {REPORTING_ROLE}"))
 
 
-def _record(conn: Connection, run_id: uuid.UUID, action: str) -> dict[str, int]:
+def _record(
+    conn: Connection, run_id: uuid.UUID, action: str, fingerprint: str | None
+) -> dict[str, int]:
+    """`fingerprint` = inputs of the version that is ACTIVE after this action
+    (change_detection compares the latest row with the current inputs)."""
     counts = _row_counts(conn, list(SCHEMAS.values()))
     max_event = conn.execute(text("SELECT max(purchased_at) FROM warehouse.fct_orders")).scalar()
     conn.execute(
         text(
             "INSERT INTO meta.publications (pipeline_run_id, action, table_row_counts, "
-            "source_max_event_at) VALUES (:run, :action, CAST(:counts AS jsonb), :max_event)"
+            "source_max_event_at, input_fingerprint) "
+            "VALUES (:run, :action, CAST(:counts AS jsonb), :max_event, :fp)"
         ),
-        {"run": run_id, "action": action, "counts": json.dumps(counts), "max_event": max_event},
+        {
+            "run": run_id,
+            "action": action,
+            "counts": json.dumps(counts),
+            "max_event": max_event,
+            "fp": fingerprint,
+        },
     )
     return counts
 
@@ -90,7 +102,11 @@ def _locked(func):
 
 
 @_locked
-def publish(engine: Engine, run_id: uuid.UUID) -> dict[str, int]:
+def publish(
+    engine: Engine, run_id: uuid.UUID, input_fingerprint: str | None = None
+) -> dict[str, int]:
+    """`input_fingerprint`: the inputs this build was made from (the flow passes the value it
+    evaluated before building). When omitted it is computed from the current inputs."""
     with engine.begin() as conn:
         conn.execute(text(f"SET LOCAL lock_timeout = '{LOCK_TIMEOUT}'"))
         decision = conn.execute(
@@ -112,7 +128,9 @@ def publish(engine: Engine, run_id: uuid.UUID) -> dict[str, int]:
                 conn.execute(text(f"ALTER SCHEMA {published} RENAME TO {published}_prev"))
             conn.execute(text(f"ALTER SCHEMA {build} RENAME TO {published}"))
             _grant_reporting(conn, published)
-        counts = _record(conn, run_id, "publish")
+        if input_fingerprint is None:
+            input_fingerprint = current_fingerprint(conn)
+        counts = _record(conn, run_id, "publish", input_fingerprint)
     log.info(
         "marts_published",
         task="publish_marts",
@@ -137,6 +155,13 @@ def rollback(engine: Engine, run_id: uuid.UUID) -> dict[str, int]:
             conn.execute(text(f"ALTER SCHEMA {published}_prev RENAME TO {published}"))
             conn.execute(text(f"ALTER SCHEMA {published}_swap RENAME TO {published}_prev"))
             _grant_reporting(conn, published)
-        counts = _record(conn, run_id, "rollback")
+        # the restored version is the one that was active before the latest action
+        restored = conn.execute(
+            text(
+                "SELECT input_fingerprint FROM meta.publications "
+                "ORDER BY published_at DESC, publication_id DESC OFFSET 1 LIMIT 1"
+            )
+        ).scalar()
+        counts = _record(conn, run_id, "rollback", restored)
     log.info("marts_rolled_back", task="publish_marts", status="ok", tables=len(counts))
     return counts

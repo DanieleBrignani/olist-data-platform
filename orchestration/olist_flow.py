@@ -1,7 +1,11 @@
 """The `olist_refresh` Prefect flow: raw files -> published, quality-gated marts.
 
-download_or_locate_source -> verify_manifest -> validate_source -> ingest_raw -> load_staging
--> dbt_build -> dbt_test -> quality_gate -> publish_marts -> publish_metrics
+download_or_locate_source -> verify_manifest -> validate_source -> ingest_raw -> detect_changes
+-> [load_staging -> dbt_build -> dbt_test -> quality_gate -> publish_marts] -> publish_metrics
+
+detect_changes compares the fingerprint of the current inputs (source snapshots + transformation
+logic) with the one of the published version; when they are equal the bracketed steps are
+skipped because they would reproduce identical tables (docs/incremental.md).
 
 The whole flow is ONE pipeline run in meta.pipeline_runs (tracked_run): a failure is
 recorded with the name of the task that failed. Tasks call the same functions the CLI uses,
@@ -19,6 +23,7 @@ from prefect import flow, task
 from sqlalchemy import text
 
 from olist_platform.config import Role, get_settings
+from olist_platform.database.change_detection import evaluate as evaluate_changes
 from olist_platform.database.engine import get_engine
 from olist_platform.database.publish import publish as swap_published_schemas
 from olist_platform.database.staging import load_staging as stage_src
@@ -26,7 +31,7 @@ from olist_platform.ingestion.manifest import LOCK_PATH, load_lock
 from olist_platform.ingestion.pipeline import ingest_raw as ingest_files
 from olist_platform.ingestion.pipeline import validate_source as check_sources
 from olist_platform.ingestion.pipeline import verify_manifest as check_manifest
-from olist_platform.ingestion.runs import tracked_run
+from olist_platform.ingestion.runs import record_event, tracked_run
 from olist_platform.ingestion.source import locate_or_download
 from olist_platform.transform.warehouse import dbt_build as build_models
 from olist_platform.transform.warehouse import dbt_test as test_models
@@ -106,8 +111,37 @@ def quality_gate(run_id: uuid.UUID, tests: Any) -> dict[str, int]:
 
 
 @task(name="publish_marts", timeout_seconds=300, **transient_retry(2))
-def publish_marts(run_id: uuid.UUID) -> dict[str, int]:
-    return swap_published_schemas(get_engine(Role.PIPELINE), run_id)
+def publish_marts(run_id: uuid.UUID, input_fingerprint: str) -> dict[str, int]:
+    return swap_published_schemas(get_engine(Role.PIPELINE), run_id, input_fingerprint)
+
+
+@task(name="detect_changes", timeout_seconds=120, **transient_retry(2))
+def detect_changes(run_id: uuid.UUID, full_refresh: bool) -> dict[str, Any]:
+    """Rebuild only when the inputs of the published version changed (or when forced)."""
+    engine = get_engine(Role.PIPELINE)
+    with engine.connect() as conn:
+        decision = evaluate_changes(conn, full_refresh)
+    with engine.begin() as conn:
+        record_event(
+            conn,
+            run_id,
+            task="detect_changes",
+            status="ok",
+            event="rebuild" if decision.rebuild else "skipped_unchanged",
+            details={
+                "reason": decision.reason,
+                "fingerprint": decision.fingerprint,
+                "published_fingerprint": decision.published_fingerprint,
+            },
+        )
+    log.info(
+        "change_detection", task="detect_changes", rebuild=decision.rebuild, reason=decision.reason
+    )
+    return {
+        "rebuild": decision.rebuild,
+        "reason": decision.reason,
+        "fingerprint": decision.fingerprint,
+    }
 
 
 @task(name="publish_metrics", timeout_seconds=120, **transient_retry(2))
@@ -151,6 +185,7 @@ def olist_refresh(
     force_reload: bool = False,
     publish_enabled: bool = True,
     lock_path: str = str(LOCK_PATH),
+    full_refresh: bool = False,
 ) -> dict[str, Any]:
     settings = get_settings()
     configure_logging(settings.log_level, settings.env, settings.log_file)
@@ -167,17 +202,21 @@ def olist_refresh(
         validate_source(directory)
         run.step("ingest_raw")
         summary["ingest"] = ingest_raw(run_id, directory, checksums, force_reload, lock_path)
-        run.step("load_staging")
-        summary["staging"] = load_staging(run_id)
-        run.step("dbt_build")
-        summary["dbt_build"] = dbt_build()
-        run.step("dbt_test")
-        tests = dbt_test()
-        run.step("quality_gate")
-        summary["quality_gate"] = quality_gate(run_id, tests)
-        if publish_enabled:
-            run.step("publish_marts")
-            summary["published_tables"] = len(publish_marts(run_id))
+        run.step("detect_changes")
+        changes = detect_changes(run_id, full_refresh or force_reload)
+        summary["changes"] = changes
+        if changes["rebuild"]:
+            run.step("load_staging")
+            summary["staging"] = load_staging(run_id)
+            run.step("dbt_build")
+            summary["dbt_build"] = dbt_build()
+            run.step("dbt_test")
+            tests = dbt_test()
+            run.step("quality_gate")
+            summary["quality_gate"] = quality_gate(run_id, tests)
+            if publish_enabled:
+                run.step("publish_marts")
+                summary["published_tables"] = len(publish_marts(run_id, changes["fingerprint"]))
         run.step("publish_metrics")
         summary["metrics"] = publish_metrics(run_id)
     return summary

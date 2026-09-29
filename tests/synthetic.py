@@ -157,3 +157,17 @@ def write_dataset(directory: Path, rows: Rows, contracts: dict[str, Contract]) -
             data = codecs.BOM_UTF8 + data
         (directory / contract.file).write_bytes(data)
     return directory
+
+
+def write_versioned_source(
+    root: Path, rows: Rows, contracts: dict[str, Contract]
+) -> tuple[str, str]:
+    """Write a dataset where the flow expects it (<root>/raw/olist/v2) plus a matching lock.
+    Returns (data_root, lock_path) for olist_refresh(data_root=..., lock_path=...)."""
+    from olist_platform.ingestion.manifest import build_manifest, write_lock  # noqa: PLC0415
+
+    directory = write_dataset(root / "raw" / "olist" / "v2", rows, contracts)
+    lock = write_lock(
+        build_manifest(directory, contracts), "synthetic", 2, path=root / "manifest.lock.json"
+    )
+    return str(root), str(lock)
