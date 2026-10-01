@@ -20,12 +20,19 @@ Deterministic failures are never retried; they are surfaced.
 |-------|---------------|--------|
 | Locally validated | the same commands, run on the Windows development host (Docker Desktop) | all jobs' commands pass |
 | Simulated CI | the `test` job run on a clean export of the committed files, in a separate compose project with a fresh database, as a non-default uid, with GNU make inside a Linux container (`docker:28-cli`); `actionlint` passes | passes |
-| **GitHub Actions** | the workflow run on GitHub-hosted `ubuntu-24.04` runners | **not yet run**: the repository has not been pushed. No "CI passing" claim is made anywhere |
+| **GitHub Actions** | the workflow run on GitHub-hosted `ubuntu-24.04` runners | **passing** since 2026-10-01 (CI #3, commit `18f6d5a`) |
 
-Things that can only fail on GitHub: action major versions resolving differently, runner disk
-or memory limits during the real-data job (about 1.5 M rows plus dbt, 734 MB database), and
-the anonymous Kaggle download if Kaggle starts requiring authentication (after the first
-successful run, the `actions/cache` entry keyed by the checksum lock removes that dependency).
+### First runs on GitHub (2026-10-01)
+
+| Run | Commit | Result | Notes |
+|-----|--------|--------|-------|
+| CI #1 | first push | lint **failed**, then cancelled | `astral-sh/setup-uv@v10` could not be resolved: since v8 that action publishes only full version tags (`v10.2.0`), no floating major tag. The local simulation could not catch it, because it does not resolve actions |
+| CI #2 | history rewrite | cancelled | superseded by the fix (`concurrency: cancel-in-progress`) |
+| CI #3 | `18f6d5a` | **success** in 22 min 33 s | lint 28 s, images 1 min 54 s, tests 12 min 1 s, real data 9 min 39 s (anonymous Kaggle download worked; the dataset is now cached by lock hash) |
+
+The other risks named before the first push (runner memory and disk during the real-data job,
+the Kaggle download) did not materialise. Kaggle could still start requiring authentication;
+the cache entry keyed by the checksum lock removes that dependency for later runs.
 
 ## Secrets
 

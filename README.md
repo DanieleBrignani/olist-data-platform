@@ -1,5 +1,7 @@
 # Olist Data Platform: a quality-gated batch warehouse on real e-commerce data
 
+[![CI](https://github.com/DanieleBrignani/olist-data-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/DanieleBrignani/olist-data-platform/actions/workflows/ci.yml)
+
 A single-node batch data platform that turns the public
 [Olist Brazilian e-commerce dataset](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce)
 (9 CSV files, 1.55 M records) into a tested PostgreSQL star schema and business marts.
@@ -61,7 +63,7 @@ dbt SQL: [docs/lineage.md](docs/lineage.md). Every design decision has an ADR:
 
 ## 3. Engineering challenges
 
-Each item was a real failure or review finding. All 36 are logged with root cause and fix in
+Each item was a real failure or review finding. All 37 are logged with root cause and fix in
 [docs/what-failed.md](docs/what-failed.md).
 
 * **Real data broke naive assumptions.** A BOM made a naive header check report a breaking
@@ -210,11 +212,11 @@ tests and a final unit-suite run (158, including the README checks) ran separate
 * **real-data:** the full pipeline on the real dataset; a CRITICAL quality failure fails CI.
 * **images:** Docker builds.
 
-**Status: the workflow has not run on GitHub yet**, because the repository has not been
-pushed. The `test` job was executed on a clean export of the committed files, as a
-non-default uid, through `make` in a Linux container (all steps pass), and `actionlint`
-passes. What can still differ on GitHub runners: [docs/ci.md](docs/ci.md). No deployment
-step exists, because there is no target environment to deploy to.
+**Status: passing on GitHub-hosted runners** (first green run: 2026-10-01, CI #3, 22 min 33 s
+in total; the real-data job took 9 min 39 s, including the anonymous Kaggle download). The first
+run failed in the lint job on an unresolvable action tag; that fix and the full history are in
+[docs/ci.md](docs/ci.md). No deployment step exists, because there is no target environment to
+deploy to.
 
 ## 11. Performance
 
@@ -320,7 +322,6 @@ benchmark/results.json  raw output of the last benchmark
 * **Single node:** one PostgreSQL instance and one Prefect worker, with no replication, HA
   or point-in-time recovery. Backups are manual (`make backup`), local, and verified by a
   round-trip test ([docs/backup-and-recovery.md](docs/backup-and-recovery.md)).
-* **CI has never run on GitHub** (section 10).
 * **Static historical source:** Olist v2 ends in 2018. Late data, schema evolution and
   incremental changes are exercised with synthetic versions in tests, not observed in
   production. "Freshness" measures publication, not business recency.

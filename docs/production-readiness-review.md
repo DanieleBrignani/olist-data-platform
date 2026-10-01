@@ -15,15 +15,15 @@ properties is backed by a test or a re-runnable command:
 * failure semantics proven by injection tests;
 * a verified backup/restore round-trip.
 
-**All 265 tests pass**, with 93% line coverage. The CI test job passes in a simulated Linux
-runner.
+**All 265 tests pass**, with 93% line coverage, and the GitHub Actions workflow (lint, tests,
+real-data run, image builds) **passes on GitHub-hosted runners** (CI #3, 2026-10-01).
 
 It is **not** a highly available production deployment:
 * one PostgreSQL instance, no PITR;
 * local, manual backups;
 * no authentication on the local UIs;
 * alerts evaluated but not routed;
-* **GitHub Actions has never run**, because the repository has not been pushed.
+* no deployment pipeline (CI only, no CD).
 
 The gap to production is operational (managed database, secrets, auth, CD), not a
 correctness gap in the data path.
@@ -81,7 +81,8 @@ and Prometheus/Grafana monitor it. Deliberately single-node (ADR-0001).
 | Verified | How |
 |----------|-----|
 | All tests pass | 265/265: 249 in a Linux container on a clean export (`make test-ci`), 14 real-data tests on the isolated test database, and the final unit suite (158) |
-| CI `test` job logic | executed step by step on a clean export via make, as uid 1001, including `make verify-backup` |
+| CI on GitHub | CI #3 on GitHub-hosted runners: all 4 jobs green in 22 min 33 s, including the real-data pipeline ([ci.md](ci.md)) |
+| CI `test` job logic, locally | executed step by step on a clean export via make, as uid 1001, including `make verify-backup` |
 | Backup/restore | `make verify-backup`: 41 tables identical after damage + restore |
 | Performance | `make benchmark` in an isolated project, 3 repetitions from empty ([benchmark.md](benchmark.md)) |
 | Index value | EXPLAIN ANALYZE with and without each index ([query_plans.md](query_plans.md)) |
@@ -90,9 +91,6 @@ and Prometheus/Grafana monitor it. Deliberately single-node (ADR-0001).
 
 ## What has NOT been verified
 
-* **GitHub Actions on GitHub-hosted runners**: never run, because the repository has not been
-  pushed. The `real-data` and `images` jobs have not been simulated as jobs; their commands
-  were run individually.
 * Behaviour under **concurrent consumers** during publication, beyond the `lock_timeout`
   unit of behaviour.
 * **Long-running operation**: metadata growth, Prometheus retention, and weeks of scheduled
@@ -176,7 +174,7 @@ Of these, 28 are failure-injection tests. Line coverage is 93% (lowest: the CLI 
 
 Four jobs: lint, test, real-data and images. The test job runs through `make` targets and
 includes reversible migrations and a backup round-trip. **Status: simulated locally only;
-never run on GitHub.** There is no CD, because there is no target environment.
+passing on GitHub** (CI #3, 2026-10-01; the first run failed on an unresolvable action tag, see [ci.md](ci.md)). There is no CD, because there is no target environment.
 [ci.md](ci.md).
 
 ## Performance
@@ -229,7 +227,6 @@ The fresh-clone Quick Start test has not yet been run for this revision (see bel
 
 See README section 15. The main ones:
 * single node;
-* never run on GitHub;
 * static source;
 * a full rebuild whenever any input changes;
 * unauthenticated local UIs;
@@ -284,5 +281,5 @@ machine shares the main stack's volumes unless `COMPOSE_PROJECT_NAME` is set.
 | No secrets in git | gitleaks + value scan | [security.md](security.md) | yes |
 | No known dependency CVEs | pip-audit, Trivy | [security.md](security.md) | yes (at audit date) |
 | Business insights come from governed data | generated from marts by the reporting role | `scripts/business_report.py`, [business_metrics.md](business_metrics.md) | yes |
-| CI passes on GitHub | – | `.github/workflows/ci.yml` | **no: never run on GitHub** |
+| CI passes on GitHub | CI #3, all 4 jobs green | `.github/workflows/ci.yml`, [ci.md](ci.md) | yes (2026-10-01) |
 | Fresh clone works with the Quick Start | Makefile targets verified individually on Linux (`help`, `lint`, `test-ci`, `verify-backup`, `benchmark`) | README section 13 | **partly: not run end to end on a fresh clone** |

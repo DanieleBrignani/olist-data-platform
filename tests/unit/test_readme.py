@@ -58,7 +58,8 @@ def test_relative_links_resolve() -> None:
     assert missing == []
 
 
-def test_ci_is_not_claimed_as_passing_on_github() -> None:
-    # Only a real GitHub Actions run may justify a "passing" claim or badge (docs/ci.md)
-    assert "badge.svg" not in README
-    assert not re.search(r"CI (is )?(passing|green)", README, re.I)
+def test_ci_badge_points_to_the_real_workflow() -> None:
+    # The badge reflects the live GitHub Actions status of the workflow committed here
+    badges = re.findall(r"actions/workflows/([\w.-]+)/badge\.svg", README)
+    assert badges == ["ci.yml"]
+    assert (ROOT / ".github" / "workflows" / "ci.yml").exists()
