@@ -6,6 +6,9 @@ SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 COMPOSE ?= docker compose
 DEV := $(COMPOSE) run --rm dev
+# Flow runs go to the stack's Prefect server (visible in its UI) instead of an ephemeral
+# in-process server, whose start-up can time out on a loaded machine.
+DEV_FLOW := $(COMPOSE) run --rm -e PREFECT_API_URL=http://prefect-server:4200/api dev
 PYTHON ?= $(shell command -v python3 2>/dev/null || command -v python 2>/dev/null)
 # The repo is bind-mounted into the dev container: on Linux it must run as your uid/gid.
 export DEV_UID ?= $(shell id -u)
@@ -29,11 +32,13 @@ up: ## start database, migrations, Prefect, metrics, Prometheus, Grafana; wait u
 	@echo "Prefect http://localhost:4200 | Grafana http://localhost:3000 | Prometheus http://localhost:9090"
 
 pipeline: ## fetch the dataset if needed and run the orchestrated pipeline once
+	$(COMPOSE) up -d --wait prefect-server
 	$(DEV) olist source fetch
-	$(DEV) olist run
+	$(DEV_FLOW) olist run
 
 pipeline-full: ## same as pipeline, but rebuild even if inputs are unchanged
-	$(DEV) olist run --full-refresh
+	$(COMPOSE) up -d --wait prefect-server
+	$(DEV_FLOW) olist run --full-refresh
 
 report: ## business metrics from the published marts (read-only reporting role)
 	$(DEV) python scripts/business_report.py

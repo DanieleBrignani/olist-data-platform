@@ -63,7 +63,7 @@ dbt SQL: [docs/lineage.md](docs/lineage.md). Every design decision has an ADR:
 
 ## 3. Engineering challenges
 
-Each item was a real failure or review finding. All 37 are logged with root cause and fix in
+Each item was a real failure or review finding. All 38 are logged with root cause and fix in
 [docs/what-failed.md](docs/what-failed.md).
 
 * **Real data broke naive assumptions.** A BOM made a naive header check report a breaking
