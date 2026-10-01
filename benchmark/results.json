@@ -1,7 +1,7 @@
 {
   "environment": {
-    "measured_at": "2026-09-27T17:03:26+00:00",
-    "git_commit": "dee7d90",
+    "measured_at": "2026-09-29T18:19:09+00:00",
+    "git_commit": "0ae2335",
     "python": "3.12.14",
     "postgres": "16.10 (Debian 16.10-1.pgdg12+1)",
     "postgres_settings": {
@@ -12,21 +12,23 @@
     "cpus_visible": 16,
     "memory_visible_gb": 7.5,
     "dataset": "olistbr/brazilian-ecommerce v2",
-    "host_note": "Windows 11 Pro laptop, Intel Core 7 240H (16 logical CPUs), 15.6 GB RAM (1.8 GB free at start); Docker Desktop (WSL2); other containers running"
+    "host_note": ""
   },
   "repetitions": [
     {
       "initial": {
         "label": "initial",
-        "total_s": 89.13,
+        "rebuild": true,
+        "total_s": 109.189,
         "steps_s": {
-          "verify_manifest": 2.255,
-          "validate_source": 0.153,
-          "ingest_raw": 21.128,
-          "load_staging": 37.229,
-          "dbt_build": 25.095,
-          "dbt_test": 3.176,
-          "quality_gate": 0.028,
+          "verify_manifest": 1.18,
+          "validate_source": 0.158,
+          "ingest_raw": 28.861,
+          "detect_changes": 0.68,
+          "load_staging": 39.24,
+          "dbt_build": 31.273,
+          "dbt_test": 7.696,
+          "quality_gate": 0.033,
           "publish_marts": 0.061
         },
         "rows_ingested": 1550922,
@@ -36,22 +38,39 @@
         "rows_staged_out": 1289091,
         "quarantined": 0,
         "flagged": 542,
-        "dq_tests": 36,
+        "dq_tests": 51,
         "dq_warnings": 6,
         "gate": "PASS"
       },
       "rerun": {
         "label": "rerun",
-        "total_s": 50.329,
+        "rebuild": false,
+        "total_s": 2.068,
         "steps_s": {
-          "verify_manifest": 0.964,
-          "validate_source": 0.045,
-          "ingest_raw": 0.074,
-          "load_staging": 27.913,
-          "dbt_build": 17.787,
-          "dbt_test": 3.447,
-          "quality_gate": 0.029,
-          "publish_marts": 0.066
+          "verify_manifest": 1.385,
+          "validate_source": 0.081,
+          "ingest_raw": 0.103,
+          "detect_changes": 0.494
+        },
+        "rows_ingested": 0,
+        "files_loaded": 0,
+        "files_skipped": 9,
+        "gate": "skipped (inputs_unchanged)"
+      },
+      "forced": {
+        "label": "forced_rebuild",
+        "rebuild": true,
+        "total_s": 97.795,
+        "steps_s": {
+          "verify_manifest": 1.586,
+          "validate_source": 0.172,
+          "ingest_raw": 0.111,
+          "detect_changes": 0.751,
+          "load_staging": 45.807,
+          "dbt_build": 38.682,
+          "dbt_test": 10.498,
+          "quality_gate": 0.082,
+          "publish_marts": 0.1
         },
         "rows_ingested": 0,
         "files_loaded": 0,
@@ -60,7 +79,7 @@
         "rows_staged_out": 1289091,
         "quarantined": 0,
         "flagged": 542,
-        "dq_tests": 36,
+        "dq_tests": 51,
         "dq_warnings": 6,
         "gate": "PASS"
       }
@@ -68,16 +87,18 @@
     {
       "initial": {
         "label": "initial",
-        "total_s": 69.237,
+        "rebuild": true,
+        "total_s": 121.009,
         "steps_s": {
-          "verify_manifest": 0.709,
-          "validate_source": 0.049,
-          "ingest_raw": 20.677,
-          "load_staging": 27.168,
-          "dbt_build": 17.405,
-          "dbt_test": 3.138,
-          "quality_gate": 0.031,
-          "publish_marts": 0.056
+          "verify_manifest": 3.429,
+          "validate_source": 0.217,
+          "ingest_raw": 36.595,
+          "detect_changes": 0.69,
+          "load_staging": 47.157,
+          "dbt_build": 26.196,
+          "dbt_test": 6.457,
+          "quality_gate": 0.078,
+          "publish_marts": 0.171
         },
         "rows_ingested": 1550922,
         "files_loaded": 9,
@@ -86,22 +107,39 @@
         "rows_staged_out": 1289091,
         "quarantined": 0,
         "flagged": 542,
-        "dq_tests": 36,
+        "dq_tests": 51,
         "dq_warnings": 6,
         "gate": "PASS"
       },
       "rerun": {
         "label": "rerun",
-        "total_s": 82.803,
+        "rebuild": false,
+        "total_s": 4.541,
         "steps_s": {
-          "verify_manifest": 0.69,
-          "validate_source": 0.047,
-          "ingest_raw": 0.067,
-          "load_staging": 40.041,
-          "dbt_build": 37.088,
-          "dbt_test": 4.75,
-          "quality_gate": 0.03,
-          "publish_marts": 0.085
+          "verify_manifest": 2.777,
+          "validate_source": 0.102,
+          "ingest_raw": 0.396,
+          "detect_changes": 1.232
+        },
+        "rows_ingested": 0,
+        "files_loaded": 0,
+        "files_skipped": 9,
+        "gate": "skipped (inputs_unchanged)"
+      },
+      "forced": {
+        "label": "forced_rebuild",
+        "rebuild": true,
+        "total_s": 94.596,
+        "steps_s": {
+          "verify_manifest": 1.009,
+          "validate_source": 0.065,
+          "ingest_raw": 0.406,
+          "detect_changes": 1.247,
+          "load_staging": 52.76,
+          "dbt_build": 28.049,
+          "dbt_test": 10.954,
+          "quality_gate": 0.028,
+          "publish_marts": 0.073
         },
         "rows_ingested": 0,
         "files_loaded": 0,
@@ -110,7 +148,7 @@
         "rows_staged_out": 1289091,
         "quarantined": 0,
         "flagged": 542,
-        "dq_tests": 36,
+        "dq_tests": 51,
         "dq_warnings": 6,
         "gate": "PASS"
       }
@@ -118,16 +156,18 @@
     {
       "initial": {
         "label": "initial",
-        "total_s": 107.681,
+        "rebuild": true,
+        "total_s": 103.234,
         "steps_s": {
           "verify_manifest": 1.304,
-          "validate_source": 0.117,
-          "ingest_raw": 32.337,
-          "load_staging": 42.484,
-          "dbt_build": 26.865,
-          "dbt_test": 4.483,
-          "quality_gate": 0.023,
-          "publish_marts": 0.063
+          "validate_source": 0.123,
+          "ingest_raw": 28.381,
+          "detect_changes": 0.363,
+          "load_staging": 41.519,
+          "dbt_build": 27.594,
+          "dbt_test": 3.854,
+          "quality_gate": 0.032,
+          "publish_marts": 0.06
         },
         "rows_ingested": 1550922,
         "files_loaded": 9,
@@ -136,22 +176,39 @@
         "rows_staged_out": 1289091,
         "quarantined": 0,
         "flagged": 542,
-        "dq_tests": 36,
+        "dq_tests": 51,
         "dq_warnings": 6,
         "gate": "PASS"
       },
       "rerun": {
         "label": "rerun",
-        "total_s": 75.71,
+        "rebuild": false,
+        "total_s": 1.861,
         "steps_s": {
-          "verify_manifest": 1.379,
-          "validate_source": 0.06,
-          "ingest_raw": 0.114,
-          "load_staging": 38.205,
-          "dbt_build": 28.545,
-          "dbt_test": 7.272,
-          "quality_gate": 0.046,
-          "publish_marts": 0.084
+          "verify_manifest": 1.473,
+          "validate_source": 0.042,
+          "ingest_raw": 0.065,
+          "detect_changes": 0.277
+        },
+        "rows_ingested": 0,
+        "files_loaded": 0,
+        "files_skipped": 9,
+        "gate": "skipped (inputs_unchanged)"
+      },
+      "forced": {
+        "label": "forced_rebuild",
+        "rebuild": true,
+        "total_s": 77.709,
+        "steps_s": {
+          "verify_manifest": 0.577,
+          "validate_source": 0.052,
+          "ingest_raw": 0.069,
+          "detect_changes": 0.331,
+          "load_staging": 38.188,
+          "dbt_build": 31.93,
+          "dbt_test": 6.386,
+          "quality_gate": 0.078,
+          "publish_marts": 0.093
         },
         "rows_ingested": 0,
         "files_loaded": 0,
@@ -160,7 +217,7 @@
         "rows_staged_out": 1289091,
         "quarantined": 0,
         "flagged": 542,
-        "dq_tests": 36,
+        "dq_tests": 51,
         "dq_warnings": 6,
         "gate": "PASS"
       }
@@ -168,158 +225,195 @@
   ],
   "aggregate": {
     "initial_total_s": {
-      "median": 89.13,
-      "min": 69.24,
-      "max": 107.68
+      "median": 109.19,
+      "min": 103.23,
+      "max": 121.01
     },
     "rerun_total_s": {
-      "median": 75.71,
-      "min": 50.33,
-      "max": 82.8
+      "median": 2.07,
+      "min": 1.86,
+      "max": 4.54
+    },
+    "forced_total_s": {
+      "median": 94.6,
+      "min": 77.71,
+      "max": 97.8
     },
     "dbt_build_s": {
-      "median": 25.09,
-      "min": 17.41,
-      "max": 26.86
+      "median": 27.59,
+      "min": 26.2,
+      "max": 31.27
     },
     "dbt_test_s": {
-      "median": 3.18,
-      "min": 3.14,
-      "max": 4.48
+      "median": 6.46,
+      "min": 3.85,
+      "max": 7.7
     },
     "ingest_rows_per_s": {
-      "median": 73406.0,
-      "min": 47961.22,
-      "max": 75007.11
+      "median": 53737.64,
+      "min": 42380.71,
+      "max": 54646.49
     },
     "staging_rows_per_s": {
-      "median": 41658.98,
-      "min": 36506.03,
-      "max": 57086.35
+      "median": 37354.51,
+      "min": 32888.48,
+      "max": 39524.01
     },
     "initial_steps": {
       "verify_manifest": {
         "median": 1.3,
-        "min": 0.71,
-        "max": 2.25
+        "min": 1.18,
+        "max": 3.43
       },
       "validate_source": {
-        "median": 0.12,
-        "min": 0.05,
-        "max": 0.15
+        "median": 0.16,
+        "min": 0.12,
+        "max": 0.22
       },
       "ingest_raw": {
-        "median": 21.13,
-        "min": 20.68,
-        "max": 32.34
+        "median": 28.86,
+        "min": 28.38,
+        "max": 36.59
+      },
+      "detect_changes": {
+        "median": 0.68,
+        "min": 0.36,
+        "max": 0.69
       },
       "load_staging": {
-        "median": 37.23,
-        "min": 27.17,
-        "max": 42.48
+        "median": 41.52,
+        "min": 39.24,
+        "max": 47.16
       },
       "dbt_build": {
-        "median": 25.09,
-        "min": 17.41,
-        "max": 26.86
+        "median": 27.59,
+        "min": 26.2,
+        "max": 31.27
       },
       "dbt_test": {
-        "median": 3.18,
-        "min": 3.14,
-        "max": 4.48
-      },
-      "quality_gate": {
-        "median": 0.03,
-        "min": 0.02,
-        "max": 0.03
-      },
-      "publish_marts": {
-        "median": 0.06,
-        "min": 0.06,
-        "max": 0.06
-      }
-    },
-    "rerun_steps": {
-      "verify_manifest": {
-        "median": 0.96,
-        "min": 0.69,
-        "max": 1.38
-      },
-      "validate_source": {
-        "median": 0.05,
-        "min": 0.04,
-        "max": 0.06
-      },
-      "ingest_raw": {
-        "median": 0.07,
-        "min": 0.07,
-        "max": 0.11
-      },
-      "load_staging": {
-        "median": 38.2,
-        "min": 27.91,
-        "max": 40.04
-      },
-      "dbt_build": {
-        "median": 28.55,
-        "min": 17.79,
-        "max": 37.09
-      },
-      "dbt_test": {
-        "median": 4.75,
-        "min": 3.45,
-        "max": 7.27
+        "median": 6.46,
+        "min": 3.85,
+        "max": 7.7
       },
       "quality_gate": {
         "median": 0.03,
         "min": 0.03,
-        "max": 0.05
+        "max": 0.08
       },
       "publish_marts": {
+        "median": 0.06,
+        "min": 0.06,
+        "max": 0.17
+      }
+    },
+    "rerun_steps": {
+      "verify_manifest": {
+        "median": 1.47,
+        "min": 1.39,
+        "max": 2.78
+      },
+      "validate_source": {
         "median": 0.08,
+        "min": 0.04,
+        "max": 0.1
+      },
+      "ingest_raw": {
+        "median": 0.1,
         "min": 0.07,
-        "max": 0.09
+        "max": 0.4
+      },
+      "detect_changes": {
+        "median": 0.49,
+        "min": 0.28,
+        "max": 1.23
+      }
+    },
+    "forced_steps": {
+      "verify_manifest": {
+        "median": 1.01,
+        "min": 0.58,
+        "max": 1.59
+      },
+      "validate_source": {
+        "median": 0.07,
+        "min": 0.05,
+        "max": 0.17
+      },
+      "ingest_raw": {
+        "median": 0.11,
+        "min": 0.07,
+        "max": 0.41
+      },
+      "detect_changes": {
+        "median": 0.75,
+        "min": 0.33,
+        "max": 1.25
+      },
+      "load_staging": {
+        "median": 45.81,
+        "min": 38.19,
+        "max": 52.76
+      },
+      "dbt_build": {
+        "median": 31.93,
+        "min": 28.05,
+        "max": 38.68
+      },
+      "dbt_test": {
+        "median": 10.5,
+        "min": 6.39,
+        "max": 10.95
+      },
+      "quality_gate": {
+        "median": 0.08,
+        "min": 0.03,
+        "max": 0.08
+      },
+      "publish_marts": {
+        "median": 0.09,
+        "min": 0.07,
+        "max": 0.1
       }
     }
   },
   "database_size": {
-    "database": 769675747,
-    "meta": 1056768,
-    "dq_failures": 368640,
-    "src": 299393024,
-    "marts": 12369920,
-    "warehouse": 160047104,
-    "raw": 286482432
+    "database": 770019811,
+    "meta": 1064960,
+    "src": 299327488,
+    "dq_failures": 491520,
+    "marts": 12763136,
+    "warehouse": 160006144,
+    "raw": 286490624
   },
   "query_latency": {
     "Q1 monthly GMV & AOV (mart)": {
-      "median_ms": 0.22,
+      "median_ms": 0.26,
       "p95_ms": 0.41,
       "runs": 20
     },
     "Q2 monthly GMV & AOV (from facts)": {
-      "median_ms": 15.52,
-      "p95_ms": 15.95,
+      "median_ms": 20.53,
+      "p95_ms": 23.05,
       "runs": 20
     },
     "Q3 late-delivery rate by state, 2018": {
-      "median_ms": 0.29,
-      "p95_ms": 0.4,
+      "median_ms": 0.31,
+      "p95_ms": 0.69,
       "runs": 20
     },
     "Q4 top-10 categories by revenue": {
-      "median_ms": 0.17,
-      "p95_ms": 0.24,
+      "median_ms": 0.26,
+      "p95_ms": 0.36,
       "runs": 20
     },
     "Q5 one seller's monthly revenue (facts)": {
-      "median_ms": 0.61,
-      "p95_ms": 0.79,
+      "median_ms": 0.96,
+      "p95_ms": 1.21,
       "runs": 20
     },
     "Q6 one customer's order history (facts)": {
-      "median_ms": 0.18,
-      "p95_ms": 0.25,
+      "median_ms": 0.28,
+      "p95_ms": 0.47,
       "runs": 20
     }
   },

@@ -52,9 +52,17 @@ correctly rebuilds the current inputs.
 
 A rebuild builds into `*_build` schemas and swaps them in atomically (ADR-0005). An incremental
 dbt model needs persistent state in its own schema, and the swap would move that state away.
-The source also has no `updated_at` to drive `is_incremental()` filters (ADR-0006). A full
-rebuild of the warehouse takes about 25 s on this dataset (benchmark), so the saving would be small
-and the risk real.
+The source also has no `updated_at` to drive `is_incremental()` filters (ADR-0006). The dbt
+build takes about 28-32 s on this dataset ([benchmark.md](benchmark.md)), so the saving would be
+small and the risk real.
+
+## Measured effect
+
+Median of 3 repetitions on the real data ([benchmark.md](benchmark.md)): an unchanged rerun
+takes **2.1 s**, against **94.6 s** for a forced rebuild of the same inputs. Most of the
+remaining 2 s is re-hashing the 126 MB of source files to prove they are unchanged. In a
+rebuild, `load_staging` is the largest step (46 s), so per-table incremental staging is the
+next optimisation if inputs start changing often.
 
 ## Evidence
 

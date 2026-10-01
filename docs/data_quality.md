@@ -42,6 +42,7 @@ Each row carries `pipeline_run_id` and a timestamp.
 | missing mandatory identifiers | contract `not_null__*` + `pattern__*` + enforced NOT NULL | ERROR / CRITICAL | 0 |
 | duplicate source records | staging `exact_duplicate` (flag + collapse) and `primary_key_conflict` (quarantine all versions) | WARNING / ERROR | 261,831 expected geolocation duplicates, collapsed |
 | orphan records | staging FK checks against valid parents + dbt `relationships` | ERROR / CRITICAL | 0 ERROR orphans; WARNING existence gaps: 278 customer zips, 7 seller zips, 13 product categories |
+| join fan-out / grain drift in business logic | `unique` + `not_null` on the grain key of every intermediate model (`dbt/models/intermediate/_intermediate.yml`) | CRITICAL | 0 |
 
 ## Custom tests (beyond unique / not_null / relationships / accepted_values)
 
