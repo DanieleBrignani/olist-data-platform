@@ -293,6 +293,10 @@ make test       # every test, including the real-data ones (make test-ci skips t
 make down       # stop; data is kept (make reset also deletes it)
 ```
 
+Verified end to end on a fresh clone from GitHub (2026-10-01): about 33 min from `git clone`
+to `make down`, 265 tests passed, and the published tables were identical to an existing stack
+([details](docs/production-readiness-review.md#fresh-clone-test)).
+
 * Prefect: http://localhost:4200
 * Grafana: http://localhost:3000
 * Prometheus: http://localhost:9090

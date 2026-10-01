@@ -28,10 +28,12 @@ It is **not** a highly available production deployment:
 The gap to production is operational (managed database, secrets, auth, CD), not a
 correctness gap in the data path.
 
-This review found and fixed three real defects:
+This review found and fixed five real defects:
 * stale build tables could be published;
 * killed runs stayed "running" forever;
-* `make benchmark` collided with a running stack.
+* `make benchmark` collided with a running stack;
+* the first GitHub run failed on an unresolvable action tag;
+* `make pipeline` timed out on a fresh clone (ephemeral Prefect server).
 
 It also found two tests that encoded outdated behaviour.
 
@@ -87,6 +89,7 @@ and Prometheus/Grafana monitor it. Deliberately single-node (ADR-0001).
 | Performance | `make benchmark` in an isolated project, 3 repetitions from empty ([benchmark.md](benchmark.md)) |
 | Index value | EXPLAIN ANALYZE with and without each index ([query_plans.md](query_plans.md)) |
 | Security | gitleaks (full history), `.env` value scan, pip-audit, Trivy ([security.md](security.md)) |
+| Fresh clone | Quick Start end to end from a GitHub clone; 265 tests pass; published tables identical to the main stack (see Fresh-clone test) |
 | Mermaid diagrams | rendered with Mermaid 11 |
 
 ## What has NOT been verified
@@ -210,7 +213,7 @@ Gaps: no authentication on Prefect or Grafana, no secrets manager, scans not sch
 * `.env` generated with random secrets.
 * A Makefile for every workflow.
 
-The fresh-clone Quick Start test has not yet been run for this revision (see below).
+The Quick Start was run end to end on a fresh clone from GitHub (see below).
 
 ## Recovery
 
@@ -255,11 +258,34 @@ the operational prerequisite for anything shared.
 
 ## Fresh-clone test
 
-**Not yet performed for this revision.** The previous review ran a fresh clone end to end
-(`--no-cache` images, real download, orchestrated run, published tables identical to the main
-stack), but the Makefile-based Quick Start has not been run on a fresh clone. Note for that
-test: `docker-compose.yml` sets `name: olist-platform`, so a second checkout on the same
-machine shares the main stack's volumes unless `COMPOSE_PROJECT_NAME` is set.
+Performed on 2026-10-01: `git clone` of the GitHub repository (commit `e315f2e`, then
+`8661bad` after the fix below) into an empty directory, followed by README section 13
+exactly, through GNU make in a Linux container (`docker:28-cli`) against the host Docker engine.
+
+| Step | Result | Time |
+|------|--------|-----:|
+| `git clone` | 208 files, no data, no `.env` | 6 s |
+| `make setup` | `.env` with 7 generated secrets; all images built (dependencies installed from scratch) | 9 min 21 s |
+| `make up` | 6 services healthy, migrations applied | 1 min 1 s |
+| `make pipeline` (first attempt) | **failed**: dataset downloaded and verified, then `olist run` timed out starting an ephemeral Prefect server | 1 min 44 s |
+| fix `8661bad`, `git pull`, `make pipeline` | 1,550,922 rows loaded, 0 rejected, 542 flagged, gate PASS, 16 tables / 667,884 rows published | 2 min 38 s |
+| `make pipeline` again | skipped by change detection (`inputs_unchanged`), 9 files skipped | 29 s |
+| `make report` | identical business answers to the main stack | 9 s |
+| `make test` | **265 passed**, 0 failed, 0 skipped (including the 14 real-data tests) | 18 min |
+| `make down` | stopped, data kept | 7 s |
+| published tables vs the main stack (`olist fingerprint`) | **all 16 identical** (row count + content md5) | – |
+
+Deviations from a newcomer's run, and why:
+* own compose project (`olistfresh`) and image prefix, so the test could not touch the main
+  stack. `docker-compose.yml` sets `name: olist-platform`, so two checkouts on one machine
+  share volumes unless `COMPOSE_PROJECT_NAME` differs;
+* the main stack was stopped so the default ports were free;
+* the container ran make as root, so `DEV_UID` was 0. A Linux user gets their own uid (the
+  CI job covers a non-root uid);
+* the Docker layer cache of base images was warm; the dependency layers were rebuilt.
+
+The one failure (ephemeral Prefect server start-up) is a real Quick Start defect that the
+development host had hidden. It is fixed and logged in [what-failed.md](what-failed.md).
 
 ## Final evidence table
 
@@ -282,4 +308,4 @@ machine shares the main stack's volumes unless `COMPOSE_PROJECT_NAME` is set.
 | No known dependency CVEs | pip-audit, Trivy | [security.md](security.md) | yes (at audit date) |
 | Business insights come from governed data | generated from marts by the reporting role | `scripts/business_report.py`, [business_metrics.md](business_metrics.md) | yes |
 | CI passes on GitHub | CI #3, all 4 jobs green | `.github/workflows/ci.yml`, [ci.md](ci.md) | yes (2026-10-01) |
-| Fresh clone works with the Quick Start | Makefile targets verified individually on Linux (`help`, `lint`, `test-ci`, `verify-backup`, `benchmark`) | README section 13 | **partly: not run end to end on a fresh clone** |
+| Fresh clone works with the Quick Start | clone from GitHub → setup → up → pipeline → report → test (265 passed) → down; published tables identical to the main stack | README section 13; Fresh-clone test above | yes (after one fix) |
