@@ -40,11 +40,6 @@ is named at the top of each file.
 | Business metrics (*generated*) | [business_metrics.md](business_metrics.md) |
 | Failures found during development and review | [what-failed.md](what-failed.md) |
 
-## Author notes
-
-Preparation material for presenting the project, not system documentation:
-[interview-guide.md](interview-guide.md), [cv-project-description.md](cv-project-description.md).
-
 ## Repository layout
 
 ```
