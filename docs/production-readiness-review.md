@@ -70,6 +70,23 @@ updated. Root causes for all of these: [what-failed.md](what-failed.md).
 | Index value | each warehouse index measured with and without | 2026-09-29 ([query_plans.md](query_plans.md)) |
 | Security scans | gitleaks over the full history, `.env` value search, pip-audit, Trivy: no findings | 2026-09-29 ([security.md](security.md)) |
 
+### Commit identifiers
+
+The repository history was rewritten twice after these results were recorded (commit
+messages were edited, and two files were removed from every commit). The file contents of
+each commit are otherwise unchanged, but the identifiers are not. Identifiers quoted in the
+documentation are the ones the results were recorded against; GitHub still shows run #3
+under `18f6d5a`. Their equivalents in the current history:
+
+| Recorded as | Current commit | Subject |
+|-------------|----------------|---------|
+| `dee7d90` | `52c7984` | Production data platform for the Olist Brazilian e-commerce dataset (first commit) |
+| `0ae2335` | `d4c570a` | fix: run the benchmark project on its own PostgreSQL host port |
+| `18f6d5a` | `e15ae46` | ci: pin astral-sh/setup-uv to v10.2.0 |
+| `e315f2e` | `1af4626` | docs: record the first green GitHub Actions run; add CI badge |
+| `8661bad` | `15a9ba0` | fix: run make pipeline against the stack's Prefect server |
+| `04a85ec` | `818fa6c` | docs: record the fresh-clone Quick Start test |
+
 ## What was not verified
 
 * Restoring the full 734 MB warehouse (the round-trip ran on the test database).
