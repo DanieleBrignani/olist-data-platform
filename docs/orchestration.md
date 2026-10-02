@@ -47,7 +47,7 @@ errors. This is proven on a real Prefect engine in `tests/integration/test_orche
   attempts, and whether the error was retryable.
 * **Flow `on_failure` / `on_crashed`:** a `flow_failed` event with the final state and message.
 * `tracked_run` records the failed task and `error_type` in `meta.pipeline_runs`. The metrics
-  exporter (Phase 9) derives `pipeline_failures_total` from that table.
+  exporter derives `pipeline_failures_total` from that table.
 
 ### Caching is disabled on purpose
 
@@ -60,7 +60,7 @@ from the data layer (checksums, atomic rebuilds, schema swap), not from orchestr
 | Service | What it does |
 |---------|--------------|
 | `prefect-server` | API + UI on http://localhost:4200. Metadata in the `prefect` database, isolated from the warehouse. |
-| `pipeline-worker` | `orchestration/serve.py`: registers the `olist-refresh` deployment and executes its runs, at most **one at a time** (`limit=1`) because concurrent refreshes would race for the schema swap. The optional `OLIST_REFRESH_CRON` sets a schedule. |
+| `pipeline-worker` | `orchestration/serve.py`: registers the `olist-refresh` deployment and executes its runs, at most **one at a time** (`limit=1`). That limit only covers deployment runs: the guarantee against interleaving (CLI steps, other workers) is the database-level pipeline lock held by every writing operation (`src/olist_platform/database/locking.py`, [failure-recovery.md](failure-recovery.md) scenario 11). The optional `OLIST_REFRESH_CRON` sets a schedule. |
 
 Trigger a run:
 

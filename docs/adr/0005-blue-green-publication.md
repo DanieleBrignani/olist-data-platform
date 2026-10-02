@@ -3,7 +3,7 @@
 **Status:** Accepted (2026-09-26)
 
 ## Context
-The brief says "Critical failures must prevent publication of downstream marts." Suppose dbt
+A requirement says "Critical failures must prevent publication of downstream marts." Suppose dbt
 wrote directly to the schemas that reporting users query. A failed test would then be found
 *after* consumers had already seen the bad data, and a half-finished run would leave a mixed
 state.

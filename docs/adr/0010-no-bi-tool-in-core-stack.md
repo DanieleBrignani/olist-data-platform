@@ -3,7 +3,7 @@
 **Status:** Accepted (2026-09-26)
 
 ## Context
-The brief makes Metabase and Superset optional. The Docker host has 8 GB of RAM, and Metabase
+The requirements make Metabase and Superset optional. The Docker host has 8 GB of RAM, and Metabase
 alone needs about 1 GB for its JVM. This repository's audience is evaluating data engineering,
 not dashboard design.
 

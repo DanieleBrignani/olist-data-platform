@@ -4,7 +4,7 @@
 
 ## Context
 The full dataset is about 126 MB of CSV (Kaggle reports 126,186,995 bytes). Around 1 M of its
-rows are geolocation; the exact row counts will be measured into the manifest in Phase 4.
+rows are geolocation; the exact row counts are recorded in the checksum manifest during ingestion.
 The platform must run on a laptop with `docker compose up` and in GitHub Actions. It must also
 show relational engineering: PK/FK/CHECK constraints, indexes and `EXPLAIN ANALYZE`.
 
@@ -27,4 +27,4 @@ instance, so the orchestrator can never read or lock warehouse objects.
 * **DuckDB**: excellent for analytics, but it has no multi-role security model and no server
   for concurrent access by the orchestrator, the exporter and BI tools.
 * **A cloud warehouse (BigQuery/Snowflake)**: a reviewer cannot reproduce it without an
-  account, and the brief rules out architecture that cannot run.
+  account, and the project requirements rule out architecture that cannot run locally.

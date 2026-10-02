@@ -79,7 +79,7 @@ one canceled order and one order without items).
 * **The last months of the snapshot are nearly empty and mostly canceled.** Measured in
   `mart_sales`: 2018-09 has 16 orders (15 canceled) and 2018-10 has 4 (all canceled), against
   about 6,500 a month before. This is a property of the extract, not a modelling error. It is
-  surfaced by a WARNING test (Phase 7) and called out in business reporting.
+  surfaced by a WARNING test and called out in business reporting.
 * **775 orders have no items** (canceled/unavailable at creation). They are kept in
   `fct_orders` with zero value, counted as orders and excluded from AOV.
 * **166 zip prefixes have no usable coordinates.** They are kept in `dim_geography` with

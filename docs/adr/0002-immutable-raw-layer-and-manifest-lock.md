@@ -4,7 +4,7 @@
 
 ## Context
 The source is the Kaggle dataset `olistbr/brazilian-ecommerce`, **version 2**, last updated
-2021-10-01T19:08:27Z, licence **CC BY-NC-SA 4.0**. I verified these facts through the Kaggle
+2021-10-01T19:08:27Z, licence **CC BY-NC-SA 4.0**. These facts were verified through the Kaggle
 public API on 2026-09-26. The dataset downloads anonymously from
 `https://www.kaggle.com/api/v1/datasets/download/olistbr/brazilian-ecommerce?datasetVersionNumber=2`.
 The raw files total about 126 MB and carry a non-commercial, share-alike licence, so they are

@@ -23,6 +23,6 @@ history with SCD type 2. The Olist source is a single snapshot:
 + There is no fabricated history. An SCD2 table built from one snapshot would have exactly one
   version per row and would imply a tracking capability the data cannot support.
 − Text keys are wider than integers. At about 100k rows per fact the join cost is small; the
-  Phase 5 and 12 measurements are where this would show up.
+  The staging and benchmark measurements are where this would show up.
 − If the source ever becomes a change feed, SCD2 on `dim_customer` (address) and
   `dim_product` (category) would be the first additions. This ADR would then be superseded.

@@ -13,7 +13,7 @@ be wrong. A merge strategy would need reliable `updated_at` columns, and the dat
 * The only incremental behaviour is at the **file** level: a file whose checksum is already
   loaded is skipped (ADR-0008).
 * Revisit this if (a) the source becomes a change feed, or (b) the measured `dbt build` time
-  becomes a bottleneck. The benchmark (Phase 12) records that time.
+  becomes a bottleneck. The benchmark records that time.
 
 ## Consequences
 + Results are deterministic, and idempotency is structural rather than dependent on merge logic.

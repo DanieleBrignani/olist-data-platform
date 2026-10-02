@@ -1,6 +1,6 @@
 # ADR-0004: Layered data quality with WARNING / ERROR / CRITICAL severities
 
-**Status:** Accepted (2026-09-26). The Great Expectations / Soda question deferred below was decided in Phase 7: neither was adopted; see [data_quality.md](../data_quality.md#great-expectations--soda-evaluated-not-adopted).
+**Status:** Accepted (2026-09-26). The Great Expectations / Soda question deferred below was decided later, during the data-quality work: neither was adopted; see [data_quality.md](../data_quality.md#great-expectations--soda-evaluated-not-adopted).
 
 ## Context
 Quality problems appear at different layers and need different responses:
@@ -8,7 +8,7 @@ Quality problems appear at different layers and need different responses:
 * an orphan order item must not reach a fact table, but it must not vanish either;
 * a review with an unusually long comment is only worth noting.
 
-The brief requires that invalid records never disappear silently and that critical failures
+The project requirements say that invalid records never disappear silently and that critical failures
 block publication.
 
 ## Decision
@@ -30,8 +30,8 @@ There are three enforcement points and one severity vocabulary.
 The quality gate is a pure function, `(dq_results, thresholds) → PASS | FAIL(reasons)`, and is
 unit-tested without a database.
 
-**Great Expectations / Soda:** the brief offers these as options. Whether a third framework adds
-anything beyond the contract engine and dbt tests is decided in Phase 7. The test case will be
+**Great Expectations / Soda:** the requirements list these as options. Whether a third framework adds
+anything beyond the contract engine and dbt tests is decided during the data-quality work. The test case will be
 one concrete job: independent reconciliation checks that share no code with the
 transformations. If the framework adds no independent guarantee, it is left out and the reason
 is documented, following the "no technology without a reason" rule.
@@ -39,4 +39,4 @@ is documented, following the "no technology without a reason" rule.
 ## Consequences
 + Every rejected record can be queried together with its original text, through `raw` lineage.
 + One severity model across all layers gives one Grafana panel and one gate.
-− The contract engine is custom code and needs thorough tests (Phase 10).
+− The contract engine is custom code and needs thorough tests.
