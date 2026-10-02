@@ -174,8 +174,8 @@ passed, 269 synthetic-data tests in 20 min with 93% line coverage, then 14 real-
 
 GitHub Actions (`.github/workflows/ci.yml`) runs lint, migrations up and down, the
 synthetic test suite, a backup/restore check, the real-data pipeline and the image builds.
-The first passing run was on 2026-10-01 (run #3, commit `18f6d5a`). The badge above shows the
-current status. There is no CD: nothing is deployed ([docs/ci.md](docs/ci.md)).
+The badge above shows the current status, and the history of the first runs is in
+[docs/ci.md](docs/ci.md). There is no CD: nothing is deployed.
 
 ### Performance
 

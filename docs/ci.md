@@ -22,9 +22,13 @@ Deterministic failures are never retried; they are surfaced.
 |-------|---------------|--------|
 | Locally validated | the same commands on the Windows development host (Docker Desktop) | all jobs' commands passed before the first push |
 | Simulated CI | the `test` job on a clean export of the committed files, in a separate compose project with a fresh database, as a non-default uid, with GNU make in a Linux container (`docker:28-cli`) | passed before the first push; `actionlint` passes |
-| **GitHub Actions** | the workflow on GitHub-hosted `ubuntu-24.04` runners | first passing run: #3, commit `18f6d5a`, 2026-10-01. Later runs are not recorded here; the README badge shows the current status |
+| **GitHub Actions** | the workflow on GitHub-hosted `ubuntu-24.04` runners | first passing run on 2026-10-01 (record below). Current runs are listed under the repository's Actions tab; the README badge shows the latest status |
 
 ### First runs on GitHub (2026-10-01)
+
+A historical record: these runs took place in the original GitHub repository, which was
+later recreated from a rewritten history, so they are no longer listed under Actions and the
+commit identifiers differ ([mapping](production-readiness-review.md#commit-identifiers)).
 
 | Run | Commit | Result | Notes |
 |-----|--------|--------|-------|

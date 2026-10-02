@@ -63,7 +63,7 @@ updated. Root causes for all of these: [what-failed.md](what-failed.md).
 |-------|--------|----------------|
 | Full test suite | 283 passed (269 synthetic-data tests with 93% line coverage, then 14 real-data tests) | 2026-10-01, working tree with the locking and change-detection changes |
 | Unit suite, including the new documentation checks | 163 passed | 2026-10-02 |
-| GitHub Actions | all four jobs passed in 22 min 33 s, including the real-data pipeline | 2026-10-01, run #3, commit `18f6d5a`; later runs not recorded here ([ci.md](ci.md)) |
+| GitHub Actions | all four jobs passed in 22 min 33 s, including the real-data pipeline | 2026-10-01, run #3, commit `18f6d5a`, in the original repository ([ci.md](ci.md)); current runs are under the Actions tab |
 | Fresh clone, Quick Start end to end | passed after one fix; 265 tests of that version passed; published tables identical to an existing stack | 2026-10-01, commit `8661bad` (record below) |
 | Benchmark | 3 repetitions from an empty database | 2026-09-29, commit `0ae2335` ([benchmark.md](benchmark.md)) |
 | Backup and restore | 41 tables identical after damage and restore, on the test database | 2026-09-29 ([backup-and-recovery.md](backup-and-recovery.md)) |
@@ -73,10 +73,11 @@ updated. Root causes for all of these: [what-failed.md](what-failed.md).
 ### Commit identifiers
 
 The repository history was rewritten twice after these results were recorded (commit
-messages were edited, and two files were removed from every commit). The file contents of
-each commit are otherwise unchanged, but the identifiers are not. Identifiers quoted in the
-documentation are the ones the results were recorded against; GitHub still shows run #3
-under `18f6d5a`. Their equivalents in the current history:
+messages were edited, and two files were removed from every commit), and the GitHub
+repository was then recreated from the rewritten history. The file contents of each commit
+are otherwise unchanged, but the identifiers are not, and the first Actions runs are no
+longer on GitHub. Identifiers quoted in the documentation are the ones the results were
+recorded against. Their equivalents in the current history:
 
 | Recorded as | Current commit | Subject |
 |-------------|----------------|---------|
@@ -158,5 +159,5 @@ Differences from a newcomer's run:
 | Rollback works | `test_rollback_restores_previous_publication_and_revokes_prev`, `test_after_rollback_the_next_run_rebuilds_the_current_inputs` | yes |
 | Backups restore | `make verify-backup` | yes, test database |
 | Roles enforce least privilege | `tests/integration/test_database_roles.py` | yes |
-| CI passes on GitHub | run #3, commit `18f6d5a` | yes, at that commit |
+| CI passes on GitHub | run #3, commit `18f6d5a` (original repository); current status: README badge | yes, at that commit |
 | The quick start works on a fresh clone | record above | yes, at commit `8661bad`, after one fix |
