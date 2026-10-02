@@ -8,7 +8,9 @@ logic) with the one of the published version; when they are equal the bracketed 
 skipped because they would reproduce identical tables (docs/incremental.md).
 
 The whole flow is ONE pipeline run in meta.pipeline_runs (tracked_run): a failure is
-recorded with the name of the task that failed. Tasks call the same functions the CLI uses,
+recorded with the name of the task that failed. It holds the database-wide pipeline lock
+(database/locking.py) from start to end, so no other refresh, CLI step or rollback can
+interleave with it. Tasks call the same functions the CLI uses,
 so the orchestrated path and the tested path are identical code.
 """
 
@@ -25,6 +27,7 @@ from sqlalchemy import text
 from olist_platform.config import Role, get_settings
 from olist_platform.database.change_detection import evaluate as evaluate_changes
 from olist_platform.database.engine import get_engine
+from olist_platform.database.locking import pipeline_lock
 from olist_platform.database.publish import publish as swap_published_schemas
 from olist_platform.database.staging import load_staging as stage_src
 from olist_platform.ingestion.manifest import LOCK_PATH, load_lock
@@ -194,29 +197,33 @@ def olist_refresh(
     with tracked_run(get_engine(Role.PIPELINE), "olist_refresh", settings.env, version) as run:
         run_id = run.pipeline_run_id
         summary["pipeline_run_id"] = str(run_id)
-        run.step("download_or_locate_source")
-        directory = download_or_locate_source(data_root)
-        run.step("verify_manifest")
-        checksums = verify_manifest(directory, lock_path)
-        run.step("validate_source")
-        validate_source(directory)
-        run.step("ingest_raw")
-        summary["ingest"] = ingest_raw(run_id, directory, checksums, force_reload, lock_path)
-        run.step("detect_changes")
-        changes = detect_changes(run_id, full_refresh or force_reload)
-        summary["changes"] = changes
-        if changes["rebuild"]:
-            run.step("load_staging")
-            summary["staging"] = load_staging(run_id)
-            run.step("dbt_build")
-            summary["dbt_build"] = dbt_build()
-            run.step("dbt_test")
-            tests = dbt_test()
-            run.step("quality_gate")
-            summary["quality_gate"] = quality_gate(run_id, tests)
-            if publish_enabled:
-                run.step("publish_marts")
-                summary["published_tables"] = len(publish_marts(run_id, changes["fingerprint"]))
-        run.step("publish_metrics")
-        summary["metrics"] = publish_metrics(run_id)
+        # One database-wide lock for the whole run (database/locking.py): the deployment's
+        # limit=1 does not cover CLI runs or other workers on the same database.
+        run.step("acquire_pipeline_lock")
+        with pipeline_lock("olist_refresh"):
+            run.step("download_or_locate_source")
+            directory = download_or_locate_source(data_root)
+            run.step("verify_manifest")
+            checksums = verify_manifest(directory, lock_path)
+            run.step("validate_source")
+            validate_source(directory)
+            run.step("ingest_raw")
+            summary["ingest"] = ingest_raw(run_id, directory, checksums, force_reload, lock_path)
+            run.step("detect_changes")
+            changes = detect_changes(run_id, full_refresh or force_reload)
+            summary["changes"] = changes
+            if changes["rebuild"]:
+                run.step("load_staging")
+                summary["staging"] = load_staging(run_id)
+                run.step("dbt_build")
+                summary["dbt_build"] = dbt_build()
+                run.step("dbt_test")
+                tests = dbt_test()
+                run.step("quality_gate")
+                summary["quality_gate"] = quality_gate(run_id, tests)
+                if publish_enabled:
+                    run.step("publish_marts")
+                    summary["published_tables"] = len(publish_marts(run_id, changes["fingerprint"]))
+            run.step("publish_metrics")
+            summary["metrics"] = publish_metrics(run_id)
     return summary

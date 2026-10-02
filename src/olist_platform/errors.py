@@ -19,6 +19,13 @@ class TransientError(PlatformError):
     error_type = "transient"
 
 
+class PipelineBusyError(TransientError):
+    """Another operation holds the database-level pipeline lock (database/locking.py).
+    Transient: the same operation succeeds once the holder finishes."""
+
+    error_type = "pipeline_busy"
+
+
 class DeterministicError(PlatformError):
     """Failure that depends only on inputs/code; retrying cannot help."""
 

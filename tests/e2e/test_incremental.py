@@ -10,6 +10,7 @@ Synthetic, contract-shaped snapshots v1 -> v2 exercise every case the policy mus
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -21,8 +22,12 @@ from olist_platform.database import change_detection
 from olist_platform.database.engine import get_engine
 from olist_platform.database.fingerprint import diff, fingerprint
 from olist_platform.database.publish import rollback
+from olist_platform.errors import QualityGateError
 from olist_platform.ingestion.runs import start_run
-from olist_platform.validation.contracts import load_contracts
+from olist_platform.quality.gate import DqResult, GateDecision
+from olist_platform.quality.gate import evaluate as evaluate_policy
+from olist_platform.transform import warehouse
+from olist_platform.validation.contracts import Severity, load_contracts
 from orchestration.olist_flow import olist_refresh
 from tests.synthetic import (
     base_rows,
@@ -285,3 +290,108 @@ def test_after_rollback_the_next_run_rebuilds_the_current_inputs(tmp_path: Path)
     assert (result["changes"]["rebuild"], result["changes"]["reason"]) == (True, "inputs_changed")
     orders = {r[0] for r in q("SELECT order_id FROM warehouse.fct_orders", Role.REPORTING)}
     assert orders == {order(1), order(2), order(4)}
+
+
+# ------------------------------------------------------------------ validation-policy changes
+
+
+def _policy_copy(root: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Copy the real transformation + validation-policy inputs and fingerprint the COPY, so a
+    test can edit a policy file (e.g. quality/gate.py) exactly as a developer would."""
+    for src in change_detection.transform_input_files():
+        dst = root / src.relative_to(change_detection.ROOT)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes(src.read_bytes())
+    real = change_detection.transform_fingerprint
+    monkeypatch.setattr(change_detection, "transform_fingerprint", lambda root_=None: real(root))
+    return root
+
+
+def _edit_gate_policy(copy_root: Path) -> None:
+    gate_file = copy_root / "src" / "olist_platform" / "quality" / "gate.py"
+    gate_file.write_text(gate_file.read_text(encoding="utf-8") + "\n# policy revision 2\n")
+
+
+def _gate_decision(run_id: str) -> list:
+    return q(
+        "SELECT decision FROM meta.quality_gate_decisions WHERE pipeline_run_id = :r", r=run_id
+    )
+
+
+def _active_fingerprint() -> str:
+    return q(
+        "SELECT input_fingerprint FROM meta.publications "
+        "ORDER BY published_at DESC, publication_id DESC LIMIT 1"
+    )[0][0]
+
+
+def test_a_policy_only_change_forces_a_new_gate_decision_on_unchanged_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    copy = _policy_copy(tmp_path / "project", monkeypatch)
+    v1 = write_versioned_source(tmp_path / "v1", base_rows(), CONTRACTS)
+    run(v1)
+    assert run(v1)["changes"]["reason"] == "inputs_unchanged"  # cheap rerun preserved
+
+    _edit_gate_policy(copy)  # same data, same dbt models, different gate policy
+    revalidated = run(v1)
+
+    assert (revalidated["changes"]["rebuild"], revalidated["changes"]["reason"]) == (
+        True,
+        "inputs_changed",
+    )
+    assert _gate_decision(revalidated["pipeline_run_id"]) == [("PASS",)]
+    assert revalidated["published_tables"] == 16
+    assert run(v1)["changes"]["reason"] == "inputs_unchanged"  # judged once under the new policy
+
+
+def test_a_stricter_policy_that_rejects_published_data_keeps_it_but_never_certifies_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rows = base_rows()
+    rows["orders"][0]["order_approved_at"] = ""  # delivered, never approved: a WARNING rule
+    v1 = write_versioned_source(tmp_path / "v1", rows, CONTRACTS)
+    copy = _policy_copy(tmp_path / "project", monkeypatch)
+    first = run(v1)
+    assert first["quality_gate"]["warnings"] >= 1  # accepted under the current policy
+    before, old_fingerprint = published(), _active_fingerprint()
+
+    # the new policy: WARNING findings block too (code change in quality/gate.py)
+    _edit_gate_policy(copy)
+
+    def warnings_block(results: list[DqResult]) -> GateDecision:
+        return evaluate_policy(
+            [
+                replace(r, severity=Severity.CRITICAL) if r.severity == Severity.WARNING else r
+                for r in results
+            ]
+        )
+
+    monkeypatch.setattr(warehouse, "evaluate", warnings_block)
+
+    for _ in range(2):  # every run re-evaluates: the failed run recorded no publication
+        with pytest.raises(QualityGateError):
+            run(v1)
+        last = q(
+            "SELECT pipeline_run_id, failed_task FROM meta.pipeline_runs "
+            "ORDER BY started_at DESC LIMIT 1"
+        )[0]
+        assert last[1] == "quality_gate"
+        assert _gate_decision(str(last[0])) == [("FAIL",)]
+        assert q(
+            "SELECT event, details->>'reason' FROM meta.ingestion_events "
+            "WHERE task = 'detect_changes' AND pipeline_run_id = :r",
+            r=last[0],
+        ) == [("rebuild", "inputs_changed")]
+
+    # consumers still read the old version, and the record still says WHICH policy judged it:
+    # the active publication's fingerprint is the old-policy one, not the current inputs'
+    assert diff(before, published()) == []
+    assert _active_fingerprint() == old_fingerprint
+    with get_engine(Role.PIPELINE).connect() as conn:
+        assert change_detection.current_fingerprint(conn) != old_fingerprint
+
+    # data fixed under the strict policy -> rebuilt, accepted, published
+    fixed = run(write_versioned_source(tmp_path / "fixed", base_rows(), CONTRACTS))
+    assert (fixed["changes"]["rebuild"], fixed["published_tables"]) == (True, 16)
+    assert _active_fingerprint() != old_fingerprint

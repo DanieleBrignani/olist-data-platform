@@ -15,15 +15,17 @@ from prefect.testing.utilities import prefect_test_harness
 from sqlalchemy import create_engine, text
 
 from olist_platform.config import Role, get_settings
+from olist_platform.database import locking
 from olist_platform.database.engine import get_engine
 from olist_platform.database.fingerprint import diff, fingerprint
-from olist_platform.errors import QualityGateError, TransientError
+from olist_platform.errors import PipelineBusyError, QualityGateError, TransientError
 from olist_platform.ingestion.loader import ingest_file
 from olist_platform.ingestion.manifest import build_manifest
 from olist_platform.ingestion.source import raw_dir
 from olist_platform.transform.dbt_runner import DbtError
 from olist_platform.validation.contracts import load_contracts
 from orchestration import olist_flow
+from tests.lockholder import other_process_holding_the_lock
 from tests.synthetic import base_rows, order, prod, seller, write_versioned_source
 
 pytestmark = [pytest.mark.e2e, pytest.mark.integration, pytest.mark.usefixtures("clean_db")]
@@ -183,4 +185,30 @@ def test_second_run_after_a_failed_run_publishes_the_fixed_data(tmp_path: Path) 
     fixed = run(write_versioned_source(tmp_path / "fixed", with_extra_order(2), CONTRACTS))
 
     assert (fixed["changes"]["rebuild"], fixed["published_tables"]) == (True, 16)
+    assert q("SELECT count(*) FROM warehouse.fct_order_items", Role.REPORTING) == [(4,)]
+
+
+def test_a_concurrent_operation_blocks_the_whole_flow_and_nothing_is_published(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """(11) Another process (a CLI step, a second worker) holds the database-wide pipeline
+    lock: the refresh writes nothing, consumers keep reading the published version, and the
+    next refresh after the holder finishes proceeds normally."""
+    run(write_versioned_source(tmp_path / "v1", base_rows(), CONTRACTS))
+    before = published()
+    files_before = q("SELECT count(*) FROM meta.source_files")
+    monkeypatch.setattr(locking, "DEFAULT_WAIT_SECONDS", 0.5)
+    v2 = write_versioned_source(tmp_path / "v2", with_extra_order(2), CONTRACTS)
+
+    with other_process_holding_the_lock():
+        with pytest.raises(PipelineBusyError):
+            run(v2)
+        assert diff(before, published()) == []  # reporting reads while the lock is held
+        assert q("SELECT count(*) FROM meta.source_files") == files_before  # v2 not ingested
+        assert q(
+            "SELECT failed_task, error_type FROM meta.pipeline_runs WHERE status = 'failed'"
+        ) == [("acquire_pipeline_lock", "pipeline_busy")]
+
+    after = run(v2)
+    assert (after["changes"]["rebuild"], after["published_tables"]) == (True, 16)
     assert q("SELECT count(*) FROM warehouse.fct_order_items", Role.REPORTING) == [(4,)]

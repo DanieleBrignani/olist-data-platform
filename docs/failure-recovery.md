@@ -17,6 +17,7 @@ run recovers without manual cleanup.
 | 8 | Interrupted pipeline (process killed) | a killed run never reaches its failure handler, so it stays `running`; its half-built `*_build` schemas remain | the next run closes runs still `running` after 3 h (flow timeout 2 h) as `failed/abandoned`, and every build starts from **empty** build schemas, so leftovers can never be published | `test_killed_run_is_closed_and_leftovers_are_never_published`, `test_recent_running_rows_are_not_closed` |
 | 9 | Second execution after a failed run | failed runs publish nothing, so their inputs still differ from the published fingerprint and the next run rebuilds | automatic | `test_second_run_after_a_failed_run_publishes_the_fixed_data` |
 | 10 | Second execution after a successful run | identical inputs → `detect_changes` skips staging, dbt, gate and publication; published tables unchanged | automatic | `test_first_run_loads_everything_and_identical_rerun_changes_nothing`, `tests/e2e/test_real_pipeline.py` |
+| 11 | Concurrent operations (a CLI step during a deployment run, a second worker) | every operation that writes pipeline state (the flow, the CLI `ingest`, `stage`, `transform`, `warehouse`, `run`, publication, rollback, `db drop-derived`) holds one PostgreSQL advisory lock for its whole duration; a contender waits up to 60 s (`OLIST_PIPELINE_LOCK_WAIT_SECONDS`), then fails as `pipeline_busy`, a transient error naming the holder's pid; it writes nothing, and readers are never blocked | rerun when the holder finishes; a killed holder's lock ends with its session | `test_a_concurrent_operation_blocks_the_whole_flow_and_nothing_is_published`, `tests/integration/test_pipeline_lock.py` (separate processes, SIGKILL, nesting, timeout) |
 
 Also covered: a bad publication discovered later is undone with `olist rollback-publish`
 (metadata-only swap back to `*_prev`, `test_rollback_restores_previous_publication_and_revokes_prev`),
@@ -37,5 +38,8 @@ and the next run then correctly rebuilds the current inputs
 
 * A crash **during** the swap transaction is safe: PostgreSQL rolls it back. A crash of the
   PostgreSQL volume itself is not: see [backup-and-recovery.md](backup-and-recovery.md).
-* Runs are serialized (`limit=1` on the deployment); running the CLI steps by hand while a
-  deployment run is in progress is not guarded.
+* Two operations from **different databases** (e.g. the real and the test warehouse) do not
+  exclude each other: the lock is per database, by design.
+* A process that keeps its lock connection open but stops making progress (hung, not dead)
+  blocks others until the flow's 2 h timeout or an operator ends its session
+  (`pg_terminate_backend(<pid>)`; the pid is in the `pipeline_busy` error).

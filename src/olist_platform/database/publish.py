@@ -21,6 +21,7 @@ from sqlalchemy import Connection, Engine, text
 from sqlalchemy.exc import DBAPIError
 
 from olist_platform.database.change_detection import current_fingerprint
+from olist_platform.database.locking import pipeline_lock
 from olist_platform.errors import DeterministicError, QualityGateError, TransientError
 from olist_platform.utils.logging import get_logger
 
@@ -107,7 +108,7 @@ def publish(
 ) -> dict[str, int]:
     """`input_fingerprint`: the inputs this build was made from (the flow passes the value it
     evaluated before building). When omitted it is computed from the current inputs."""
-    with engine.begin() as conn:
+    with pipeline_lock("publish"), engine.begin() as conn:
         conn.execute(text(f"SET LOCAL lock_timeout = '{LOCK_TIMEOUT}'"))
         decision = conn.execute(
             text("SELECT decision FROM meta.quality_gate_decisions WHERE pipeline_run_id = :run"),
@@ -144,7 +145,7 @@ def publish(
 @_locked
 def rollback(engine: Engine, run_id: uuid.UUID) -> dict[str, int]:
     """Swap the published schemas with *_prev (a second rollback re-applies the newer one)."""
-    with engine.begin() as conn:
+    with pipeline_lock("rollback"), engine.begin() as conn:
         conn.execute(text(f"SET LOCAL lock_timeout = '{LOCK_TIMEOUT}'"))
         for published in SCHEMAS.values():
             if not (_schema_exists(conn, published) and _schema_exists(conn, f"{published}_prev")):

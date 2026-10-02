@@ -13,6 +13,7 @@ from sqlalchemy import Engine, text
 
 from olist_platform.config import Role
 from olist_platform.database.engine import get_engine
+from olist_platform.database.locking import pipeline_lock
 from olist_platform.database.publish import publish
 from olist_platform.ingestion.runs import tracked_run
 from olist_platform.quality.gate import (
@@ -78,14 +79,16 @@ def run_warehouse(
     target_path: str | None = None,
 ) -> WarehouseSummary:
     with tracked_run(engine, "olist_warehouse", environment, dataset_version) as run:
-        run.step("dbt_build")
-        build = dbt_build(target_path)
-        run.step("dbt_test")
-        tests = dbt_test(target_path)
-        run.step("quality_gate")
-        decision = quality_gate(engine, run.pipeline_run_id, tests)
-        published = None
-        if publish_marts:
-            run.step("publish_marts")
-            published = publish(engine, run.pipeline_run_id)
-        return WarehouseSummary(run.pipeline_run_id, build, tests, decision, published)
+        run.step("acquire_pipeline_lock")
+        with pipeline_lock("olist_warehouse"):
+            run.step("dbt_build")
+            build = dbt_build(target_path)
+            run.step("dbt_test")
+            tests = dbt_test(target_path)
+            run.step("quality_gate")
+            decision = quality_gate(engine, run.pipeline_run_id, tests)
+            published = None
+            if publish_marts:
+                run.step("publish_marts")
+                published = publish(engine, run.pipeline_run_id)
+            return WarehouseSummary(run.pipeline_run_id, build, tests, decision, published)
