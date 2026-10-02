@@ -50,7 +50,7 @@ def test_dbt_severity_mirrors_dq_severity(tests_in_manifest: dict[str, dict]) ->
 
 
 def test_required_rule_coverage(tests_in_manifest: dict[str, dict]) -> None:
-    """The brief's mandatory rules each exist as a classified test."""
+    """Each mandatory data-quality rule exists as a classified test."""
     names = {n["name"] for n in tests_in_manifest.values()}
 
     def has(fragment: str) -> bool:

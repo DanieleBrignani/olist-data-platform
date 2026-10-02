@@ -12,6 +12,7 @@ from sqlalchemy import text
 
 from olist_platform.config import Role, get_settings
 from olist_platform.database.engine import get_engine
+from olist_platform.database.locking import pipeline_lock
 from olist_platform.database.publish import rollback
 from olist_platform.errors import DataContractError, PlatformError
 from olist_platform.ingestion.manifest import (
@@ -97,9 +98,15 @@ def db_drop_derived(yes: bool = typer.Option(False, "--yes", help="Confirm")) ->
     if not yes:
         typer.echo("refusing without --yes: this drops published warehouse/marts schemas")
         raise typer.Exit(code=1)
-    with get_engine(Role.PIPELINE).begin() as conn:  # the owner of the dbt schemas
-        for schema in DERIVED_SCHEMAS:
-            conn.execute(text(f"DROP SCHEMA IF EXISTS {schema} CASCADE"))
+    try:
+        with pipeline_lock("drop_derived"), get_engine(Role.PIPELINE).begin() as conn:
+            for schema in DERIVED_SCHEMAS:  # the pipeline role owns the dbt schemas
+                conn.execute(text(f"DROP SCHEMA IF EXISTS {schema} CASCADE"))
+    except PlatformError as exc:
+        get_logger("migrations").error(
+            "drop_derived_failed", error_type=exc.error_type, error=str(exc)
+        )
+        raise typer.Exit(code=1) from exc
     get_logger("migrations").info("derived_schemas_dropped", schemas=list(DERIVED_SCHEMAS))
 
 
@@ -237,7 +244,8 @@ def transform(
     """dbt build: staging/intermediate views, warehouse_build and marts_build tables + tests."""
     args = ["build"] + (["--select", select] if select else [])
     try:
-        run = run_dbt(args)
+        with pipeline_lock("olist_transform"):  # writes the dbt build schemas
+            run = run_dbt(args)
     except PlatformError as exc:
         get_logger("transform").error("transform_failed", error_type=exc.error_type, error=str(exc))
         raise typer.Exit(code=1) from exc

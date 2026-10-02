@@ -45,6 +45,7 @@ from olist_platform.config import Role, get_settings
 from olist_platform.database.change_detection import evaluate
 from olist_platform.database.engine import get_engine
 from olist_platform.database.fingerprint import fingerprint
+from olist_platform.database.locking import pipeline_lock
 from olist_platform.database.publish import publish
 from olist_platform.database.staging import load_staging
 from olist_platform.ingestion.manifest import LOCK_PATH, load_lock
@@ -149,7 +150,10 @@ def run_cycle(
     directory = raw_dir(ROOT / "data")
     out: dict[str, Any] = {"label": label}
     started = time.perf_counter()
-    with tracked_run(engine, f"benchmark_{label}", get_settings().env, lock.dataset_version) as run:
+    with (
+        pipeline_lock(f"benchmark_{label}"),
+        tracked_run(engine, f"benchmark_{label}", get_settings().env, lock.dataset_version) as run,
+    ):
         with timer.step("verify_manifest"):
             checksums = verify_manifest(directory, lock)
         with timer.step("validate_source"):

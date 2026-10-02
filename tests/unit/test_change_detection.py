@@ -5,9 +5,11 @@ from pathlib import Path
 import pytest
 
 from olist_platform.database.change_detection import (
+    ROOT,
     decide,
     input_fingerprint,
     transform_fingerprint,
+    transform_input_files,
 )
 
 A, B = "a" * 64, "b" * 64
@@ -59,3 +61,35 @@ def test_input_fingerprint_depends_on_sources_and_logic() -> None:
 
 def test_real_project_fingerprint_is_stable() -> None:
     assert transform_fingerprint() == transform_fingerprint()
+
+
+POLICY_INPUTS = {
+    "src/olist_platform/quality/gate.py",  # blocking semantics, default severity, tolerance
+    "src/olist_platform/transform/dbt_runner.py",  # dbt results -> gate inputs
+    "src/olist_platform/transform/warehouse.py",  # which tests run, how the gate is applied
+    "src/olist_platform/validation/contracts.py",  # how contract rules are read
+    "src/olist_platform/database/staging.py",  # quarantine / flag / reject
+    "dbt/dbt_project.yml",  # default test severity
+}
+
+
+def test_the_validation_policy_is_part_of_the_fingerprint() -> None:
+    inputs = {p.relative_to(ROOT).as_posix() for p in transform_input_files()}
+    assert inputs >= POLICY_INPUTS
+    assert not any("__pycache__" in i or i.endswith(".pyc") for i in inputs)
+
+
+def _with_gate(root: Path, body: bytes) -> Path:
+    gate = root / "src" / "olist_platform" / "quality" / "gate.py"
+    gate.parent.mkdir(parents=True)
+    gate.write_bytes(body)
+    return root
+
+
+def test_a_policy_only_change_changes_the_fingerprint(tmp_path: Path) -> None:
+    same_sql = "select 1\n"
+    lenient = _with_gate(_project(tmp_path / "a", same_sql), b"BLOCK_WARNINGS = False\n")
+    strict = _with_gate(_project(tmp_path / "b", same_sql), b"BLOCK_WARNINGS = True\n")
+    crlf = _with_gate(_project(tmp_path / "c", same_sql), b"BLOCK_WARNINGS = False\r\n")
+    assert transform_fingerprint(lenient) != transform_fingerprint(strict)
+    assert transform_fingerprint(lenient) == transform_fingerprint(crlf)  # line endings ignored

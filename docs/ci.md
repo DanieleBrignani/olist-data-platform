@@ -1,4 +1,6 @@
-# CI/CD
+# Continuous integration
+
+There is CI but no CD: nothing is built into a registry or deployed (see the last section).
 
 Workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml). It runs on pushes to
 `main`, on pull requests and on demand. Every step fails the workflow on a non-zero exit code.
@@ -18,9 +20,9 @@ Deterministic failures are never retried; they are surfaced.
 
 | Level | What it means | Status |
 |-------|---------------|--------|
-| Locally validated | the same commands, run on the Windows development host (Docker Desktop) | all jobs' commands pass |
-| Simulated CI | the `test` job run on a clean export of the committed files, in a separate compose project with a fresh database, as a non-default uid, with GNU make inside a Linux container (`docker:28-cli`); `actionlint` passes | passes |
-| **GitHub Actions** | the workflow run on GitHub-hosted `ubuntu-24.04` runners | **passing** since 2026-10-01 (CI #3, commit `18f6d5a`) |
+| Locally validated | the same commands on the Windows development host (Docker Desktop) | all jobs' commands passed before the first push |
+| Simulated CI | the `test` job on a clean export of the committed files, in a separate compose project with a fresh database, as a non-default uid, with GNU make in a Linux container (`docker:28-cli`) | passed before the first push; `actionlint` passes |
+| **GitHub Actions** | the workflow on GitHub-hosted `ubuntu-24.04` runners | first passing run: #3, commit `18f6d5a`, 2026-10-01. Later runs are not recorded here; the README badge shows the current status |
 
 ### First runs on GitHub (2026-10-01)
 
@@ -30,9 +32,9 @@ Deterministic failures are never retried; they are surfaced.
 | CI #2 | history rewrite | cancelled | superseded by the fix (`concurrency: cancel-in-progress`) |
 | CI #3 | `18f6d5a` | **success** in 22 min 33 s | lint 28 s, images 1 min 54 s, tests 12 min 1 s, real data 9 min 39 s (anonymous Kaggle download worked; the dataset is now cached by lock hash) |
 
-The other risks named before the first push (runner memory and disk during the real-data job,
-the Kaggle download) did not materialise. Kaggle could still start requiring authentication;
-the cache entry keyed by the checksum lock removes that dependency for later runs.
+Run #3 also showed that the runner has enough memory and disk for the real-data job, and that
+the anonymous Kaggle download works from GitHub. If Kaggle starts requiring authentication,
+the cache entry keyed by the checksum lock still covers later runs.
 
 ## Secrets
 
@@ -62,7 +64,7 @@ on Windows/macOS hides this, so it was caught by simulating the runner, not by l
 
 ## Not included (deliberately)
 
-* **Deployment / image publishing:** there is no registry or target environment, so a CD step
-  would be fake infrastructure. The `images` job proves the deployable artefacts build.
+* **Deployment / image publishing (CD):** there is no registry or target environment to deploy
+  to. The `images` job only checks that the images build.
 * **Scheduled real-data runs:** the dataset is a static snapshot; `workflow_dispatch` allows an
   on-demand rerun.

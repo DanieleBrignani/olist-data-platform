@@ -199,8 +199,10 @@ def build(conn: Connection) -> tuple[str, str]:
         "",
         "## Delivery performance",
         "",
-        "**Lateness drives dissatisfaction.** Reviews of delivered orders, by whether the "
-        "order arrived after its promised date:",
+        "**Late deliveries are associated with lower review scores.** Reviews of delivered "
+        "orders, by whether the order arrived after its promised date. This is a descriptive "
+        "comparison, not a causal estimate: late and on-time orders can also differ in "
+        "product, seller, region or season, and none of that is controlled for here.",
         "",
         *table(
             ["Delivery", "Reviews", "Avg score", "Share scoring 1-2"],
@@ -348,7 +350,7 @@ def build(conn: Connection) -> tuple[str, str]:
             "Full report: [docs/business_metrics.md](docs/business_metrics.md).",
             "",
             *table(
-                ["Business question", "Answer from the governed warehouse"],
+                ["Business question", "Answer from the published marts"],
                 [
                     [
                         "How much was sold?",
@@ -357,11 +359,12 @@ def build(conn: Connection) -> tuple[str, str]:
                     ],
                     [
                         "How reliable is delivery?",
-                        f"median lead time {d.median_days:.1f} days vs "
-                        f"{d.promised_days:.1f} promised; {pct(d.late_rate)} of deliveries late",
+                        f"mean lead time {d.avg_days:.1f} days (median {d.median_days:.1f}) vs "
+                        f"{d.promised_days:.1f} promised on average; "
+                        f"{pct(d.late_rate)} of deliveries late",
                     ],
                     [
-                        "Does lateness matter?",
+                        "Are late orders reviewed worse?",
                         f"late orders average {late.avg_score} stars vs "
                         f"{ontime.avg_score} on time; {pct(late.low_score_share)} of late "
                         f"orders score 1-2 vs {pct(ontime.low_score_share)}",

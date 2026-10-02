@@ -1,7 +1,7 @@
-# What failed and what I changed
+# What failed and what changed
 
-Every real failure, wrong assumption or review finding, with its root cause and the change
-it led to, in the order they happened.
+Failures, wrong assumptions and review findings recorded during development and review, with
+the root cause and the change each one led to, in the order they were found.
 
 | Area | What failed | Root cause | Change |
 |------|-------------|------------|--------|
@@ -18,7 +18,7 @@ it led to, in the order they happened.
 | dbt models | `dbt --profiles-dir /app/dbt` resolved to `C:/Program Files/Git/app/dbt` | Git Bash on Windows rewrites POSIX-looking arguments passed to `docker compose run` | `DBT_PROFILES_DIR` / `DBT_PROJECT_DIR` are set in the compose service environment, so no path is passed on the command line |
 | Data quality | The first draft of the reconciliation test would have blocked every run that quarantined an order | It compared all persons in `src.customers` with `dim_customer`, but a customer whose only order was quarantined legitimately stays in `src` without an order | The invariant is now "persons *with an order*", found by reasoning through the quarantine cascade before running it |
 | Data quality | While measuring rules, ad-hoc queries ran for 26 minutes and PostgreSQL sat at 100% CPU | `timeout` killed only the `psql` client; the server kept executing the abandoned queries. The host was also memory-starved (about 1.2 GB free) and another project's database container was using a full core | The stuck queries were cancelled with `pg_cancel_backend`. Ad-hoc sessions now always set `PGOPTIONS='-c statement_timeout=60s'`, so an abandoned client can never leave work running |
-| Data quality | While writing `publish_marts` I found that the demoted `*_prev` schemas would stay readable by the reporting role | Schema privileges travel with the schema through `ALTER SCHEMA ... RENAME` | The swap revokes reporting access from the schema being demoted, in the same transaction; an integration test asserts it |
+| Data quality | While `publish_marts` was being written, it turned out that the demoted `*_prev` schemas would stay readable by the reporting role | Schema privileges travel with the schema through `ALTER SCHEMA ... RENAME` | The swap revokes reporting access from the schema being demoted, in the same transaction; an integration test asserts it |
 | Orchestration | The metrics event of the first real orchestrated run logged `"rows_written": "Decimal('1289091')"` | PostgreSQL `sum()` returns `numeric` (Python `Decimal`), and the JSON renderer fell back to `repr()`, so any log consumer would get strings instead of numbers | The JSON renderer serialises `Decimal` as a number and UUID/datetime as strings; a unit test pins it |
 | Orchestration | `logs/pipeline.jsonl` stopped being valid JSON Lines: raw `HTTP Request: POST .../api/logs/` lines appeared | Records from third-party stdlib loggers (Prefect's `httpx` client) bypassed structlog and were written with `%(message)s` | All stdlib records go through structlog's `ProcessorFormatter`, so foreign loggers become JSON with `logger`/`environment` fields; `httpx`/`httpcore`/`urllib3` are set to WARNING. A test asserts every file line parses as JSON |
 | Orchestration | (Design review, not a runtime failure) Prefect's default task caching could skip a pipeline step whose inputs look identical to a previous run's | Orchestrator caching is meant for pure computations; these steps have side effects | Every task uses `cache_policy=NO_CACHE`, asserted by a unit test. Idempotency comes from the data layer, not from caching |

@@ -2,10 +2,13 @@
 
 A publication is a pure function of two inputs:
   1. the source snapshots: the sha256 of the latest loaded file of every source table;
-  2. the transformation logic: dbt project, data contracts, staging engine.
+  2. the logic: what transforms the data AND what decides whether it may be published
+     (dbt project and tests, data contracts, staging engine, quality-gate policy).
 If both are identical to those of the last successful publication and the published schemas
-still exist, rebuilding would reproduce byte-identical tables (proven by the idempotency tests),
-so the flow skips staging, dbt, the gate and publication. `--full-refresh` always rebuilds.
+still exist, rebuilding would reproduce byte-identical tables judged by the same policy
+(see the idempotency tests), so the flow skips staging, dbt, the gate and publication.
+`--full-refresh` always rebuilds. A policy-only change forces a fresh gate decision; what
+happens when the new policy fails is described in docs/incremental.md.
 """
 
 from __future__ import annotations
@@ -20,14 +23,21 @@ from sqlalchemy import Connection, text
 ROOT = Path(__file__).resolve().parents[3]
 PUBLISHED_SCHEMAS = ("warehouse", "marts")
 
-# Everything whose content determines the published tables for given source files.
+# Everything whose content determines, for given source files, the published tables or the
+# decision to publish them. What is deliberately excluded, and why: docs/incremental.md.
 TRANSFORM_INPUTS: tuple[str, ...] = (
-    "dbt/dbt_project.yml",
-    "dbt/models/**/*",
+    # transformation
+    "dbt/dbt_project.yml",  # also the default severity of every dbt test
+    "dbt/models/**/*",  # models and their test definitions (severity, tolerance)
     "dbt/macros/**/*",
     "dbt/tests/**/*",
-    "data_contracts/*.yml",
-    "src/olist_platform/database/staging.py",
+    "data_contracts/*.yml",  # record rules, severities, reject limits
+    "src/olist_platform/database/staging.py",  # rule engine: quarantine / flag / reject
+    # validation policy: how contracts are read and how test results become a gate decision
+    "src/olist_platform/validation/contracts.py",
+    "src/olist_platform/transform/dbt_runner.py",
+    "src/olist_platform/transform/warehouse.py",
+    "src/olist_platform/quality/gate.py",
 )
 
 
@@ -39,12 +49,15 @@ class RebuildDecision:
     published_fingerprint: str | None
 
 
+def transform_input_files(root: Path = ROOT) -> list[Path]:
+    return sorted({p for pattern in TRANSFORM_INPUTS for p in root.glob(pattern) if p.is_file()})
+
+
 def transform_fingerprint(root: Path = ROOT) -> str:
-    """sha256 over path + content of every transformation input, in sorted order.
-    Line endings are normalised so Windows and Linux checkouts agree."""
+    """sha256 over path + content of every transformation and validation-policy input, in
+    sorted order. Line endings are normalised so Windows and Linux checkouts agree."""
     digest = hashlib.sha256()
-    files = sorted({p for pattern in TRANSFORM_INPUTS for p in root.glob(pattern) if p.is_file()})
-    for path in files:
+    for path in transform_input_files(root):
         digest.update(path.relative_to(root).as_posix().encode())
         digest.update(b"\0")
         digest.update(path.read_bytes().replace(b"\r\n", b"\n"))

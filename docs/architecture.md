@@ -12,8 +12,8 @@ translation). The files are normalised for OLTP use, contain known quality issue
 timestamps, product categories without translation) and no business-level documentation
 beyond the Kaggle description.
 
-The platform turns that snapshot into a governed, tested, dimensional warehouse that can be
-**rebuilt safely at any time**, and proves it with tests, metrics and measured benchmarks.
+The platform turns that snapshot into a tested dimensional warehouse that can be rebuilt
+from the locked source files at any time.
 
 ## 2. Architecture
 
@@ -51,7 +51,10 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    S(["Prefect deployment olist-refresh<br/>1 concurrent run, flow timeout 2 h"]) --> D[download_or_locate_source]
+    S(["Prefect deployment olist-refresh<br/>1 concurrent run, flow timeout 2 h"]) --> LK{"acquire pipeline lock<br/>PostgreSQL advisory lock"}
+    CLI(["CLI: ingest / stage / transform /<br/>warehouse / rollback / drop-derived"]) --> LK
+    LK -->|"held by another operation for 60 s"| X0[["FAIL pipeline_busy, nothing written"]]
+    LK --> D[download_or_locate_source]
     D --> V{"verify_manifest<br/>checksums"}
     V -->|mismatch| X1[["FAIL, not retried"]]
     V --> SC{"validate_source<br/>header vs contract"}
@@ -64,10 +67,12 @@ flowchart TD
     G -->|"CRITICAL, or ERROR above tolerance"| X3[["FAIL, nothing published"]]
     G -->|pass| P["publish_marts<br/>schema swap"]
     P --> M[publish_metrics]
-    X1 & X2 & X3 -.-> R[("meta.pipeline_runs<br/>status, failed_task, error_type")]
+    X0 & X1 & X2 & X3 -.-> R[("meta.pipeline_runs<br/>status, failed_task, error_type")]
 ```
 
-Retries apply only to failures classified as transient (network, connection loss, lock
+Every operation that writes pipeline state takes the same database-level lock first
+(`src/olist_platform/database/locking.py`); the deployment's one-run limit alone would not stop
+a CLI step from interleaving with a scheduled run. Retries apply only to failures classified as transient (network, connection loss, lock
 timeout; `orchestration/policies.py`). A checksum, contract, dbt or gate failure is
 deterministic and fails on the first attempt.
 

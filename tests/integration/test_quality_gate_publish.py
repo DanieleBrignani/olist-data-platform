@@ -1,6 +1,6 @@
 """Quality gate -> publication, end to end on the real dbt project (synthetic data).
 
-FAILURE TEST (required by the brief): inject ONE invalid source condition that no
+FAILURE TEST: inject ONE invalid source condition that no
 single-file contract can see - an order line whose shipping deadline precedes the order's
 purchase - and prove that:
   * ingestion and staging accept it (it is valid per every file contract),

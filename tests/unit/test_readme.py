@@ -11,22 +11,15 @@ ROOT = Path(__file__).resolve().parents[2]
 README = (ROOT / "README.md").read_text(encoding="utf-8")
 
 REQUIRED = [
-    "What problem does this solve?",
+    "The problem",
+    "What the pipeline produces",
     "Architecture",
-    "Engineering challenges",
-    "Technology stack",
-    "Data model",
-    "Data quality",
-    "Orchestration",
-    "Observability",
-    "Testing",
-    "CI/CD",
-    "Performance",
-    "Business insight",
     "Quick start",
-    "Repository structure",
+    "Example result",
+    "Engineering decisions",
+    "Testing and CI",
     "Known limitations",
-    "Future improvements",
+    "Further documentation",
 ]
 
 

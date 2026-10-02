@@ -13,6 +13,7 @@ from pathlib import Path
 
 from sqlalchemy import Engine
 
+from olist_platform.database.locking import pipeline_lock
 from olist_platform.database.staging import TableResult, load_staging
 from olist_platform.errors import DataContractError
 from olist_platform.ingestion.loader import FileLoadResult, ingest_file
@@ -93,23 +94,25 @@ def run_ingestion(
 ) -> IngestionSummary:
     lock = lock or load_lock()
     with tracked_run(engine, "olist_ingestion", environment, lock.dataset_version) as run:
-        run.step("verify_manifest")
-        checksums = verify_manifest(directory, lock)
-        run.step("validate_source")
-        validate_source(directory, contracts)
-        run.step("ingest_raw")
-        results = ingest_raw(
-            engine, run.pipeline_run_id, directory, lock, checksums, contracts, force_reload
-        )
-        summary = IngestionSummary(run.pipeline_run_id, results, run.elapsed_ms)
-        log.info(
-            "ingestion_summary",
-            rows_written=summary.rows_loaded,
-            rows_rejected=summary.rows_rejected,
-            files_loaded=sum(r.status == "loaded" for r in results),
-            files_skipped=sum(r.status == "skipped" for r in results),
-            duration_ms=summary.duration_ms,
-        )
+        run.step("acquire_pipeline_lock")
+        with pipeline_lock("olist_ingestion"):
+            run.step("verify_manifest")
+            checksums = verify_manifest(directory, lock)
+            run.step("validate_source")
+            validate_source(directory, contracts)
+            run.step("ingest_raw")
+            results = ingest_raw(
+                engine, run.pipeline_run_id, directory, lock, checksums, contracts, force_reload
+            )
+            summary = IngestionSummary(run.pipeline_run_id, results, run.elapsed_ms)
+            log.info(
+                "ingestion_summary",
+                rows_written=summary.rows_loaded,
+                rows_rejected=summary.rows_rejected,
+                files_loaded=sum(r.status == "loaded" for r in results),
+                files_skipped=sum(r.status == "skipped" for r in results),
+                duration_ms=summary.duration_ms,
+            )
     return summary
 
 
@@ -119,5 +122,7 @@ def run_staging(
     """load_staging as its own tracked run (the Prefect flow chains it after ingest_raw)."""
     version = next(iter(contracts.values())).dataset_version
     with tracked_run(engine, "olist_staging", environment, version) as run:
-        run.step("load_staging")
-        return load_staging(engine, run.pipeline_run_id, contracts)
+        run.step("acquire_pipeline_lock")
+        with pipeline_lock("olist_staging"):
+            run.step("load_staging")
+            return load_staging(engine, run.pipeline_run_id, contracts)

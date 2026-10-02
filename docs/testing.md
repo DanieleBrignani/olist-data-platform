@@ -1,15 +1,18 @@
 # Testing
 
-**265 pytest tests** (158 unit, 89 integration, 18 end-to-end; 14 of them run on the real
+**286 pytest tests** (163 unit, 102 integration, 21 end-to-end; 14 of them run on the real
 dataset) plus **51 dbt data tests** that run inside every pipeline execution. Counts come from
 `pytest --collect-only` and `dbt ls --resource-type test`.
 
-Latest runs, 2026-09-29 to 2026-10-01: **265 passed, 0 failed, 0 skipped.** The 249 tests without the
-real dataset (what CI's test job runs, `make test-ci`) took 16.6 min in a Linux container on a
-clean export. The 14 real-data tests took 8.6 min.
+Latest full run, 2026-10-01: **283 passed, 0 failed, 0 skipped.** The 269 tests without the
+real dataset (what CI's test job runs, `make test-ci`) took 20 min; the 14 real-data tests
+took 9 min. The three documentation checks in `tests/unit/test_docs_consistency.py` (links and
+anchors, documented `make` targets, documented `olist` commands and options) were added on
+2026-10-02, when the unit suite (163) passed. Earlier versions were also run in a Linux container on a clean export and on a
+fresh clone (265 tests at commit `8661bad`).
 
-**Line coverage: 93%** of `olist_platform` + `orchestration` over those 249 tests. The lowest
-modules are the thin CLI wrapper (57%) and `orchestration/serve.py` (0%: it only starts the
+**Line coverage: 93%** of `olist_platform` + `orchestration` over those 269 tests. The lowest
+modules are the thin CLI wrapper (56%) and `orchestration/serve.py` (0%: it only starts the
 long-running deployment server, and is exercised by `make up` rather than by tests).
 
 ## How to run
@@ -29,7 +32,7 @@ and can never touch the warehouse holding real data.
 Markers: `integration` (needs Postgres), `e2e` (runs the real Prefect flow), `source_data`
 (needs the downloaded Olist files; skipped with an explicit reason otherwise).
 
-## Required test categories → where they are proven
+## Test categories → where each behaviour is tested
 
 ### Unit tests
 | Required | Tests |
@@ -73,9 +76,10 @@ requirement by requirement in [incremental.md](incremental.md).
 md5 over every row in canonical order. `test_fingerprint.py` proves it detects a one-cent
 change, NULL vs '', a lost row and a duplicate row, while ignoring insertion order.
 
-### Failure injection: 28 tests
+### Failure injection: 40 tests
 
-22 test functions, 28 collected tests (`test_error_rules_quarantine` runs once per rule). Each
+30 test functions, 40 collected tests (`test_error_rules_quarantine` runs once per rule, the
+entry-point lock test once per entry point). Each
 injects a failure into a running system and asserts the platform's response.
 Scenario-level view: [failure-recovery.md](failure-recovery.md).
 
@@ -103,6 +107,14 @@ Scenario-level view: [failure-recovery.md](failure-recovery.md).
 | `test_failure_recovery.py::test_dbt_model_failure_publishes_nothing_and_is_not_retried` | broken dbt model | one attempt, nothing published |
 | `test_failure_recovery.py::test_killed_run_is_closed_and_leftovers_are_never_published` | run killed mid-build | closed as abandoned; leftovers never published |
 | `test_failure_recovery.py::test_second_run_after_a_failed_run_publishes_the_fixed_data` | gate failure, then fixed data | next run rebuilds and publishes |
+| `test_pipeline_lock.py::test_two_processes_never_hold_the_lock_together` | a second OS process holds the pipeline lock | contender rejected as `pipeline_busy` (transient), then succeeds after release |
+| `test_pipeline_lock.py::test_bounded_wait_gives_up_after_the_timeout` | holder never finishes | contender gives up after the bounded wait |
+| `test_pipeline_lock.py::test_the_lock_is_released_when_the_owning_process_is_killed` | holder killed with SIGKILL | lock freed by the session's end; next operation proceeds |
+| `test_pipeline_lock.py::test_the_lock_is_released_on_exceptions_and_never_left_in_a_pool` | exception inside the locked block | lock released, no pooled session keeps it |
+| `test_pipeline_lock.py::test_every_writing_entry_point_waits_for_the_lock_and_writes_nothing` (×5) | lock held during ingestion, staging, warehouse, publish, rollback | nothing written; CLI runs record `acquire_pipeline_lock` / `pipeline_busy` |
+| `test_pipeline_lock.py::test_a_failed_holder_does_not_block_the_next_operation` | holder crashes | next operation acquires |
+| `test_failure_recovery.py::test_a_concurrent_operation_blocks_the_whole_flow_and_nothing_is_published` | lock held during a full refresh | refresh writes nothing, readers unaffected, next refresh publishes |
+| `test_incremental.py::test_a_stricter_policy_that_rejects_published_data_keeps_it_but_never_certifies_it` | gate policy made stricter on unchanged data | rebuilt and re-judged on every run; old version kept but its fingerprint still marks the old policy |
 
 ## Synthetic data policy
 

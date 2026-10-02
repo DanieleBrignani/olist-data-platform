@@ -27,7 +27,7 @@ by `tests/unit/test_dq_classification.py`, which parses the dbt manifest.
 
 Each row carries `pipeline_run_id` and a timestamp.
 
-## Rule coverage (the brief's list → where it is enforced)
+## Rule coverage (required rules → where each is enforced)
 
 | Rule | Layer / test | Severity | Olist v2 baseline |
 |------|--------------|----------|-------------------|
@@ -86,11 +86,11 @@ severity, run id and timestamp.
 
 ## Great Expectations / Soda: evaluated, not adopted
 
-ADR-0004 deferred this decision to Phase 7, with one test case: *independent reconciliation
+ADR-0004 deferred this decision to the data-quality work, with one test case: *independent reconciliation
 checks that share no code with the transformations*. That need is now met by
 `assert_src_to_warehouse_reconciliation`. It reads `src` directly and compares it with the
 facts, so it shares no transformation logic, and its results flow through the same severity
 model, quarantine table and gate. Adding GE or Soda would duplicate those checks in a second
 framework with a second result format and another dependency set, and give no additional
-guarantee. Per the rule "do not add technologies without a concrete architectural reason",
+guarantee. Without a concrete architectural reason to add a technology,
 neither is used.
